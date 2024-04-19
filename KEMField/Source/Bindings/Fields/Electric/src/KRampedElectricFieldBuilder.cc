@@ -25,6 +25,7 @@ STATICINT sKRampedElectricFieldStructure = KRampedElectricFieldBuilder::Attribut
                                            KRampedElectricFieldBuilder::Attribute<double>("ramp_down_delay") +
                                            KRampedElectricFieldBuilder::Attribute<double>("ramp_up_time") +
                                            KRampedElectricFieldBuilder::Attribute<double>("ramp_down_time") +
+                                           KRampedElectricFieldBuilder::Attribute<double>("quadratic_constant") +
                                            KRampedElectricFieldBuilder::Attribute<double>("time_constant") +
                                            KRampedElectricFieldBuilder::Attribute<double>("time_scaling");
 

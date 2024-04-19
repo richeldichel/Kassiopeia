@@ -36,6 +36,8 @@ template<> inline bool KRampedElectricFieldBuilder::AddAttribute(KContainer* aCo
         std::string tFlag = aContainer->AsString();
         if (tFlag == "linear")
             fObject->SetRampingType(KEMField::KRampedElectricField::rtLinear);
+        else if (tFlag == "quadratic")
+            fObject->SetRampingType(KEMField::KRampedElectricField::rtQuadratic);
         else if (tFlag == "exponential")
             fObject->SetRampingType(KEMField::KRampedElectricField::rtExponential);
         else if (tFlag == "sinus")
@@ -60,6 +62,10 @@ template<> inline bool KRampedElectricFieldBuilder::AddAttribute(KContainer* aCo
     }
     if (aContainer->GetName() == "ramp_down_time") {
         aContainer->CopyTo(fObject, &KEMField::KRampedElectricField::SetRampDownTime);
+        return true;
+    }
+    if (aContainer->GetName() == "quadratic_constant") {
+        aContainer->CopyTo(fObject, &KEMField::KRampedElectricField::SetQuadraticConstant);
         return true;
     }
     if (aContainer->GetName() == "time_constant") {

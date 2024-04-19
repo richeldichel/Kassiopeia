@@ -20,6 +20,7 @@ class KRampedElectricField : public KElectricField
     typedef enum
     {
         rtLinear,       // simple linear ramping
+        rtQuadratic,    // linear ramping with quadratic term during ramp up
         rtExponential,  // exponential ramping with given time constant
         rtSinus,        // simple sinus ramping
     } eRampingType;
@@ -47,6 +48,7 @@ class KRampedElectricField : public KElectricField
     K_SET_GET(double, RampDownDelay);
     K_SET_GET(double, RampUpTime);
     K_SET_GET(double, RampDownTime);
+    K_SET_GET(double, QuadraticConstant);
     K_SET_GET(double, TimeConstant);
     K_SET_GET(double, TimeScalingFactor)
 };

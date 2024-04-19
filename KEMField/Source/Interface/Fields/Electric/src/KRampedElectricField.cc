@@ -74,7 +74,16 @@ double KRampedElectricField::GetModulationFactor(const double& aTime) const
             else if (tTime >= tUp)
                 Field = ((tTime - tUp) / fRampUpTime);
             break;
-
+        case rtQuadratic:
+            if (tTime >= tLow)
+                Field = 0.;
+            else if (tTime >= tDown)
+                Field = (1. + fQuadraticConstant * ((tLow - tTime) / (fRampDownTime)) - ((tTime - tDown) / fRampDownTime));
+            else if (tTime >= tHigh)
+                Field = 1. + fQuadraticConstant;
+            else if (tTime >= tUp)
+                Field = ((tTime - tUp) / fRampUpTime) + fQuadraticConstant * pow((tTime - tUp), 2) / pow(fRampUpTime, 2);
+            break;
         case rtExponential:
             if (tTime >= tLow)
                 Field = 0.;
