@@ -441,6 +441,7 @@ void KSRoot::ExecuteRun()
     if (numThreads > 1) {
         // Parallel execution
         runmsg(eNormal) << "using " << numThreads << " threads for parallel event processing" << eom;
+        runmsg(eWarning) << "parallel mode: random number generation is not guaranteed to be reproducible" << eom;
 
         // Initialize event queue
         fEventQueue.clear();

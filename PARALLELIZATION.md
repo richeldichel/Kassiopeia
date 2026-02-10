@@ -49,7 +49,11 @@ The parallelization is implemented at the event level:
 ### Limitations
 
 1. **Event Order**: Events may complete in a different order than single-threaded execution
-2. **Reproducibility**: While seeded random generation is synchronized, the exact sequence of random numbers may differ due to parallel execution
+2. **Random Number Generation**: The global random number generator (KRandom singleton) is shared across threads
+   - Different runs with the same seed may produce slightly different results in parallel mode
+   - This is because random numbers are consumed in a non-deterministic order due to thread scheduling
+   - For exact reproducibility, use `number_of_threads="1"` (single-threaded mode)
+   - Statistical distributions across large numbers of events should remain consistent
 3. **Cache Sharing**: File caches and other shared resources are accessed through mutex locks
 
 ## Examples
