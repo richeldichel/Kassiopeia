@@ -76,7 +76,6 @@ class KSRoot : public KSComponentTemplate<KSRoot>
 
     void ExecuteEventParallel(EventWorker& worker);
     void ExecuteTrackParallel(EventWorker& worker);
-    void ExecuteStepParallel(EventWorker& worker);
     void ThreadWorkerFunction(unsigned int threadId);
 
   protected:

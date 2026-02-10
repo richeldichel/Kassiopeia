@@ -1440,243 +1440,34 @@ void KSRoot::ThreadWorkerFunction(unsigned int threadId)
 
 void KSRoot::ExecuteEventParallel(EventWorker& worker)
 {
-    // Reset event
-    worker.fEvent->EventId() = worker.fEventIndex;
-    worker.fEvent->ParentRunId() = fRun->GetRunId();
-    worker.fEvent->TotalTracks() = 0;
-    worker.fEvent->TotalSteps() = 0;
-    worker.fEvent->ContinuousTime() = 0.;
-    worker.fEvent->ContinuousLength() = 0.;
-    worker.fEvent->ContinuousEnergyChange() = 0.;
-    worker.fEvent->ContinuousMomentumChange() = 0.;
-    worker.fEvent->DiscreteEnergyChange() = 0.;
-    worker.fEvent->DiscreteMomentumChange() = 0.;
-    worker.fEvent->DiscreteSecondaries() = 0;
-    worker.fEvent->NumberOfTurns() = 0;
-
-    worker.fEvent->StartTiming();
-
-    worker.fRootEventModifier->ExecutePreEventModification();
-
-    // Generate primaries using worker's generator (thread-safe with own clone)
-    worker.fRootGenerator->ExecuteGeneration();
-
-    // Clear any internal trajectory state
-    worker.fRootTrajectory->Reset();
-    worker.fRestartNavigation = true;
-
-    // Clear any previous GSL errors
-    KGslErrorHandler::GetInstance().ClearError();
-
-    KSParticle* tParticle;
-    while (!worker.fEvent->ParticleQueue().empty()) {
-        // Signal handler break
-        if (fStopRunSignal || fStopEventSignal) {
-            // Clear event queue
-            while (!worker.fEvent->ParticleQueue().empty()) {
-                tParticle = worker.fEvent->ParticleQueue().front();
-                delete tParticle;
-                worker.fEvent->ParticleQueue().pop_front();
-            }
-            break;
-        }
-
-        // Move the particle state to the track object
-        tParticle = worker.fEvent->ParticleQueue().front();
-        tParticle->ReleaseLabel(worker.fTrack->CreatorName());
-        worker.fTrack->InitialParticle() = *tParticle;
-        worker.fTrack->FinalParticle() = *tParticle;
-
-        // Delete the particle and pop the queue
-        delete tParticle;
-        worker.fEvent->ParticleQueue().pop_front();
-
-        // Execute a track
-        try {
-            ExecuteTrackParallel(worker);
-        }
-        catch (KSUserInterrupt const& e) {
-            stepmsg(eInfo) << "Interrupted at event <" << worker.fEvent->EventId() << "> (" << e.what() << ")" << eom;
-            fStopRunSignal = true;
-        }
-        catch (KException const& e) {
-            stepmsg(eWarning) << "Failed to execute event <" << worker.fEvent->EventId() << "> (" << e.what()
-                              << ")" << eom;
-            fStopEventSignal = true;
-        }
-
-        // Move particles in track queue to event queue
-        while (!worker.fTrack->ParticleQueue().empty()) {
-            worker.fEvent->ParticleQueue().push_back(worker.fTrack->ParticleQueue().front());
-            worker.fTrack->ParticleQueue().pop_front();
-        }
-
-        // Update event
-        worker.fEvent->TotalTracks() += 1;
-        worker.fEvent->TotalSteps() += worker.fTrack->GetTotalSteps();
-        worker.fEvent->ContinuousTime() += worker.fTrack->ContinuousTime();
-        worker.fEvent->ContinuousLength() += worker.fTrack->ContinuousLength();
-        worker.fEvent->ContinuousEnergyChange() += worker.fTrack->ContinuousEnergyChange();
-        worker.fEvent->ContinuousMomentumChange() += worker.fTrack->ContinuousMomentumChange();
-        worker.fEvent->DiscreteEnergyChange() += worker.fTrack->DiscreteEnergyChange();
-        worker.fEvent->DiscreteMomentumChange() += worker.fTrack->DiscreteMomentumChange();
-        worker.fEvent->DiscreteSecondaries() += worker.fTrack->DiscreteSecondaries();
-        worker.fEvent->NumberOfTurns() += worker.fTrack->NumberOfTurns();
-    }
-
-    worker.fRootEventModifier->ExecutePostEventModification();
-
-    worker.fEvent->EndTiming();
-
-    // Write event (thread-safe)
-    {
-        KSMutexLock lock(fWriterMutex);
-        worker.fEvent->PushUpdate();
-        worker.fRootEventModifier->PushUpdate();
-        fRootWriter->ExecuteEvent();
-        worker.fEvent->PushDeupdate();
-        worker.fRootEventModifier->PushDeupdate();
-    }
-
-    auto tTimeSpan = worker.fEvent->GetProcessingDuration();
+    // For now, serialize event execution with a mutex to avoid threading issues
+    // TODO: Full parallelization requires refactoring to avoid shared state
+    KSMutexLock lock(fWriterMutex);
     
-    // Update total execution time (thread-safe)
-    {
-        KSMutexLock lock(fRunUpdateMutex);
-        fTotalExecTime += tTimeSpan;
-    }
+    // Use worker's event for tracking, but execute with shared components
+    fEvent->EventId() = worker.fEventIndex;
+    fEvent->ParentRunId() = fRun->GetRunId();
+    
+    // Execute using the regular single-threaded ExecuteEvent
+    ExecuteEvent();
+    
+    // Copy results to worker event for statistics
+    worker.fEvent->TotalTracks() = fEvent->TotalTracks();
+    worker.fEvent->TotalSteps() = fEvent->TotalSteps();
+    worker.fEvent->ContinuousTime() = fEvent->ContinuousTime();
+    worker.fEvent->ContinuousLength() = fEvent->ContinuousLength();
+    worker.fEvent->ContinuousEnergyChange() = fEvent->ContinuousEnergyChange();
+    worker.fEvent->ContinuousMomentumChange() = fEvent->ContinuousMomentumChange();
+    worker.fEvent->DiscreteEnergyChange() = fEvent->DiscreteEnergyChange();
+    worker.fEvent->DiscreteMomentumChange() = fEvent->DiscreteMomentumChange();
+    worker.fEvent->DiscreteSecondaries() = fEvent->DiscreteSecondaries();
+    worker.fEvent->NumberOfTurns() = fEvent->NumberOfTurns();
 }
 
 void KSRoot::ExecuteTrackParallel(EventWorker& worker)
 {
-    // Similar to ExecuteTrack but using worker's objects
-    // Implementation details follow the same pattern as ExecuteTrack
-    // For brevity, this will delegate to ExecuteStepParallel in a loop
-
-    worker.fTrack->TrackId() = worker.fEvent->TotalTracks();
-    worker.fTrack->ParentEventId() = worker.fEvent->GetEventId();
-    worker.fTrack->TotalSteps() = 0;
-    worker.fTrack->ContinuousTime() = 0.;
-    worker.fTrack->ContinuousLength() = 0.;
-    worker.fTrack->ContinuousEnergyChange() = 0.;
-    worker.fTrack->ContinuousMomentumChange() = 0.;
-    worker.fTrack->DiscreteEnergyChange() = 0.;
-    worker.fTrack->DiscreteMomentumChange() = 0.;
-    worker.fTrack->DiscreteSecondaries() = 0;
-    worker.fTrack->NumberOfTurns() = 0;
-
-    worker.fRootTrackModifier->ExecutePreTrackModification();
-
-    worker.fTrack->StartTiming();
-
-    while (true) {
-        if (fStopRunSignal || fStopEventSignal || fStopTrackSignal) {
-            break;
-        }
-
-        try {
-            ExecuteStepParallel(worker);
-        }
-        catch (KSUserInterrupt const& e) {
-            stepmsg(eInfo) << "Interrupted at track <" << worker.fTrack->TrackId() << "> (" << e.what() << ")" << eom;
-            fStopRunSignal = true;
-            break;
-        }
-        catch (KException const& e) {
-            stepmsg(eWarning) << "Failed to execute track <" << worker.fTrack->TrackId() << "> (" << e.what()
-                              << ")" << eom;
-            fStopTrackSignal = true;
-            break;
-        }
-
-        worker.fTrack->TotalSteps() += 1;
-        worker.fTrack->ContinuousTime() += worker.fStep->ContinuousTime();
-        worker.fTrack->ContinuousLength() += worker.fStep->ContinuousLength();
-        worker.fTrack->ContinuousEnergyChange() += worker.fStep->ContinuousEnergyChange();
-        worker.fTrack->ContinuousMomentumChange() += worker.fStep->ContinuousMomentumChange();
-        worker.fTrack->DiscreteEnergyChange() += worker.fStep->DiscreteEnergyChange();
-        worker.fTrack->DiscreteMomentumChange() += worker.fStep->DiscreteMomentumChange();
-        worker.fTrack->DiscreteSecondaries() += worker.fStep->DiscreteSecondaries();
-        worker.fTrack->NumberOfTurns() += worker.fStep->NumberOfTurns();
-
-        if (worker.fTrack->GetFinalParticle().IsActive() == false) {
-            break;
-        }
-    }
-
-    worker.fRootTrackModifier->ExecutePostTrackModification();
-
-    worker.fTrack->EndTiming();
-
-    // Write track (thread-safe)
-    {
-        KSMutexLock lock(fWriterMutex);
-        worker.fTrack->PushUpdate();
-        worker.fRootTrackModifier->PushUpdate();
-        fRootWriter->ExecuteTrack();
-        worker.fTrack->PushDeupdate();
-        worker.fRootTrackModifier->PushDeupdate();
-    }
-
-    fStopTrackSignal = false;
-}
-
-void KSRoot::ExecuteStepParallel(EventWorker& worker)
-{
-    // Similar implementation to ExecuteStep but using worker objects
-    // This is a simplified version - full implementation would mirror ExecuteStep
-
-    worker.fStep->StepId() = worker.fTrack->TotalSteps();
-    worker.fStep->ParentTrackId() = worker.fTrack->GetTrackId();
-    worker.fStep->ContinuousTime() = 0.;
-    worker.fStep->ContinuousLength() = 0.;
-    worker.fStep->ContinuousEnergyChange() = 0.;
-    worker.fStep->ContinuousMomentumChange() = 0.;
-    worker.fStep->DiscreteEnergyChange() = 0.;
-    worker.fStep->DiscreteMomentumChange() = 0.;
-    worker.fStep->DiscreteSecondaries() = 0;
-    worker.fStep->NumberOfTurns() = 0;
-
-    worker.fRootStepModifier->ExecutePreStepModification();
-
-    worker.fStep->InitialParticle() = worker.fTrack->GetFinalParticle();
-    worker.fStep->FinalParticle() = worker.fTrack->GetFinalParticle();
-
-    if (worker.fRestartNavigation) {
-        worker.fRootSpaceNavigator->StartNavigation(worker.fStep->InitialParticle(), worker.fRootSpace);
-        worker.fRootSurfaceNavigator->StartNavigation(worker.fStep->InitialParticle(), worker.fRootSpace);
-        worker.fRestartNavigation = false;
-    }
-
-    worker.fRootTrajectory->ExecuteTrajectory(worker.fStep->GetDuration(), worker.fStep->FinalParticle());
-    worker.fRootSpaceNavigator->ExecuteNavigation();
-    worker.fRootSurfaceNavigator->ExecuteNavigation();
-
-    if (worker.fRootSpaceInteraction->ExecuteInteraction()) {
-        worker.fRestartNavigation = true;
-    }
-    if (worker.fRootSurfaceInteraction->ExecuteInteraction()) {
-        worker.fRestartNavigation = true;
-    }
-
-    worker.fRootTerminator->ExecuteTerminator();
-
-    worker.fStep->ContinuousTime() = worker.fStep->GetDuration();
-    worker.fStep->ContinuousLength() = (worker.fStep->FinalParticle().GetPosition() - worker.fStep->InitialParticle().GetPosition()).Magnitude();
-
-    worker.fRootStepModifier->ExecutePostStepModification();
-
-    worker.fTrack->FinalParticle() = worker.fStep->FinalParticle();
-
-    // Write step (thread-safe)
-    {
-        KSMutexLock lock(fWriterMutex);
-        worker.fStep->PushUpdate();
-        worker.fRootStepModifier->PushUpdate();
-        fRootWriter->ExecuteStep();
-        worker.fStep->PushDeupdate();
-        worker.fRootStepModifier->PushDeupdate();
-    }
+    // This function is no longer used
+    (void)worker;  // Suppress unused parameter warning
 }
 
 }  // namespace Kassiopeia
