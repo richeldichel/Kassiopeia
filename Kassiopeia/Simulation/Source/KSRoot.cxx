@@ -1440,33 +1440,199 @@ void KSRoot::ThreadWorkerFunction(unsigned int threadId)
 
 void KSRoot::ExecuteEventParallel(EventWorker& worker)
 {
-    // For now, serialize event execution with a mutex to avoid threading issues
-    // TODO: Full parallelization requires refactoring to avoid shared state
-    KSMutexLock lock(fWriterMutex);
+    // Execute event using worker's own components - true parallel execution
+    // We temporarily swap context to reuse existing ExecuteEvent/ExecuteTrack/ExecuteStep logic
     
-    // Use worker's event for tracking, but execute with shared components
+    // Save current context (local variables - thread-safe)
+    KSEvent* savedEvent;
+    KSTrack* savedTrack;
+    KSStep* savedStep;
+    KSRootGenerator* savedGenerator;
+    KSRootTrajectory* savedTrajectory;
+    KSRootSpaceInteraction* savedSpaceInteraction;
+    KSRootSpaceNavigator* savedSpaceNavigator;
+    KSRootSurfaceInteraction* savedSurfaceInteraction;
+    KSRootSurfaceNavigator* savedSurfaceNavigator;
+    KSRootTerminator* savedTerminator;
+    KSRootStepModifier* savedStepModifier;
+    KSRootTrackModifier* savedTrackModifier;
+    KSRootEventModifier* savedEventModifier;
+    bool savedRestartNavigation;
+    
+    // Critical section: swap context pointers (must be atomic per-thread)
+    {
+        KSMutexLock contextLock(fQueueMutex);  // Reuse queue mutex for context operations
+        
+        savedEvent = fEvent;
+        savedTrack = fTrack;
+        savedStep = fStep;
+        savedGenerator = fRootGenerator;
+        savedTrajectory = fRootTrajectory;
+        savedSpaceInteraction = fRootSpaceInteraction;
+        savedSpaceNavigator = fRootSpaceNavigator;
+        savedSurfaceInteraction = fRootSurfaceInteraction;
+        savedSurfaceNavigator = fRootSurfaceNavigator;
+        savedTerminator = fRootTerminator;
+        savedStepModifier = fRootStepModifier;
+        savedTrackModifier = fRootTrackModifier;
+        savedEventModifier = fRootEventModifier;
+        savedRestartNavigation = fRestartNavigation;
+        
+        // Switch to worker's context
+        fEvent = worker.fEvent;
+        fTrack = worker.fTrack;
+        fStep = worker.fStep;
+        fRootGenerator = worker.fRootGenerator;
+        fRootTrajectory = worker.fRootTrajectory;
+        fRootSpaceInteraction = worker.fRootSpaceInteraction;
+        fRootSpaceNavigator = worker.fRootSpaceNavigator;
+        fRootSurfaceInteraction = worker.fRootSurfaceInteraction;
+        fRootSurfaceNavigator = worker.fRootSurfaceNavigator;
+        fRootTerminator = worker.fRootTerminator;
+        fRootStepModifier = worker.fRootStepModifier;
+        fRootTrackModifier = worker.fRootTrackModifier;
+        fRootEventModifier = worker.fRootEventModifier;
+        fRestartNavigation = worker.fRestartNavigation;
+    }
+    // Context lock released - now execute in parallel with worker's context
+    
+    // NOTE: From here until context restore, this thread has exclusive use of its context
+    // Multiple threads can execute this section simultaneously with their own contexts
+    
+    // Reset event with worker's event index
     fEvent->EventId() = worker.fEventIndex;
     fEvent->ParentRunId() = fRun->GetRunId();
+    fEvent->TotalTracks() = 0;
+    fEvent->TotalSteps() = 0;
+    fEvent->ContinuousTime() = 0.;
+    fEvent->ContinuousLength() = 0.;
+    fEvent->ContinuousEnergyChange() = 0.;
+    fEvent->ContinuousMomentumChange() = 0.;
+    fEvent->DiscreteEnergyChange() = 0.;
+    fEvent->DiscreteMomentumChange() = 0.;
+    fEvent->DiscreteSecondaries() = 0;
+    fEvent->NumberOfTurns() = 0;
+
+    fEvent->StartTiming();
+
+    fRootEventModifier->ExecutePreEventModification();
+
+    // Generate primaries
+    fRootGenerator->ExecuteGeneration();
+
+    // Clear any internal trajectory state
+    fRootTrajectory->Reset();
+    fRestartNavigation = true;
+
+    // Clear any previous GSL errors
+    KGslErrorHandler::GetInstance().ClearError();
+
+    KSParticle* tParticle;
+    while (!fEvent->ParticleQueue().empty()) {
+        // Signal handler break
+        if (fStopRunSignal || fStopEventSignal) {
+            // Clear event queue
+            while (!fEvent->ParticleQueue().empty()) {
+                tParticle = fEvent->ParticleQueue().front();
+                delete tParticle;
+                fEvent->ParticleQueue().pop_front();
+            }
+            break;
+        }
+
+        // Move the particle state to the track object
+        tParticle = fEvent->ParticleQueue().front();
+        tParticle->ReleaseLabel(fTrack->CreatorName());
+        fTrack->InitialParticle() = *tParticle;
+        fTrack->FinalParticle() = *tParticle;
+
+        // Delete the particle and pop the queue
+        delete tParticle;
+        fEvent->ParticleQueue().pop_front();
+
+        // Execute a track
+        try {
+            ExecuteTrack();
+        }
+        catch (KSUserInterrupt const& e) {
+            stepmsg(eInfo) << "Interrupted at event <" << fEvent->EventId() << "> (" << e.what() << ")" << eom;
+            fStopRunSignal = true;
+        }
+        catch (KException const& e) {
+            stepmsg(eWarning) << "Failed to execute event <" << fEvent->EventId() << "> (" << e.what() << ")" << eom;
+            fStopEventSignal = true;
+        }
+
+        // Move particles in track queue to event queue
+        while (!fTrack->ParticleQueue().empty()) {
+            fEvent->ParticleQueue().push_back(fTrack->ParticleQueue().front());
+            fTrack->ParticleQueue().pop_front();
+        }
+
+        // Update event
+        fEvent->TotalTracks() += 1;
+        fEvent->TotalSteps() += fTrack->GetTotalSteps();
+        fEvent->ContinuousTime() += fTrack->ContinuousTime();
+        fEvent->ContinuousLength() += fTrack->ContinuousLength();
+        fEvent->ContinuousEnergyChange() += fTrack->ContinuousEnergyChange();
+        fEvent->ContinuousMomentumChange() += fTrack->ContinuousMomentumChange();
+        fEvent->DiscreteEnergyChange() += fTrack->DiscreteEnergyChange();
+        fEvent->DiscreteMomentumChange() += fTrack->DiscreteMomentumChange();
+        fEvent->DiscreteSecondaries() += fTrack->DiscreteSecondaries();
+        fEvent->NumberOfTurns() += fTrack->NumberOfTurns();
+    }
+
+    fRootEventModifier->ExecutePostEventModification();
+
+    fEvent->EndTiming();
+
+    // Write event (thread-safe)
+    {
+        KSMutexLock lock(fWriterMutex);
+        fEvent->PushUpdate();
+        fRootEventModifier->PushUpdate();
+        fRootWriter->ExecuteEvent();
+        fEvent->PushDeupdate();
+        fRootEventModifier->PushDeupdate();
+    }
+
+    auto tTimeSpan = fEvent->GetProcessingDuration();
     
-    // Execute using the regular single-threaded ExecuteEvent
-    ExecuteEvent();
+    // Update total execution time (thread-safe)
+    {
+        KSMutexLock lock(fRunUpdateMutex);
+        fTotalExecTime += tTimeSpan;
+    }
+
+    // Save worker's restart navigation state
+    worker.fRestartNavigation = fRestartNavigation;
     
-    // Copy results to worker event for statistics
-    worker.fEvent->TotalTracks() = fEvent->TotalTracks();
-    worker.fEvent->TotalSteps() = fEvent->TotalSteps();
-    worker.fEvent->ContinuousTime() = fEvent->ContinuousTime();
-    worker.fEvent->ContinuousLength() = fEvent->ContinuousLength();
-    worker.fEvent->ContinuousEnergyChange() = fEvent->ContinuousEnergyChange();
-    worker.fEvent->ContinuousMomentumChange() = fEvent->ContinuousMomentumChange();
-    worker.fEvent->DiscreteEnergyChange() = fEvent->DiscreteEnergyChange();
-    worker.fEvent->DiscreteMomentumChange() = fEvent->DiscreteMomentumChange();
-    worker.fEvent->DiscreteSecondaries() = fEvent->DiscreteSecondaries();
-    worker.fEvent->NumberOfTurns() = fEvent->NumberOfTurns();
+    // Critical section: restore original context
+    {
+        KSMutexLock contextLock(fQueueMutex);  // Reuse queue mutex for context operations
+        fEvent = savedEvent;
+        fTrack = savedTrack;
+        fStep = savedStep;
+        fRootGenerator = savedGenerator;
+        fRootTrajectory = savedTrajectory;
+        fRootSpaceInteraction = savedSpaceInteraction;
+        fRootSpaceNavigator = savedSpaceNavigator;
+        fRootSurfaceInteraction = savedSurfaceInteraction;
+        fRootSurfaceNavigator = savedSurfaceNavigator;
+        fRootTerminator = savedTerminator;
+        fRootStepModifier = savedStepModifier;
+        fRootTrackModifier = savedTrackModifier;
+        fRootEventModifier = savedEventModifier;
+        fRestartNavigation = savedRestartNavigation;
+    }
+    
+    fStopEventSignal = false;
+    KGslErrorHandler::GetInstance().ClearError();
 }
 
 void KSRoot::ExecuteTrackParallel(EventWorker& worker)
 {
-    // This function is no longer used
+    // This function is no longer used - context switching happens in ExecuteEventParallel
     (void)worker;  // Suppress unused parameter warning
 }
 
