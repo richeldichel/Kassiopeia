@@ -466,15 +466,35 @@ void KSRoot::ExecuteRun()
             worker->fStep->SetName("step_worker_" + std::to_string(i));
 
             // Clone root components (these need to be thread-safe)
+            worker->fRootGenerator = static_cast<KSRootGenerator*>(fRootGenerator->Clone());
+            worker->fRootGenerator->SetEvent(worker->fEvent);
+            
             worker->fRootTrajectory = static_cast<KSRootTrajectory*>(fRootTrajectory->Clone());
+            worker->fRootTrajectory->SetStep(worker->fStep);
+            
             worker->fRootSpaceInteraction = static_cast<KSRootSpaceInteraction*>(fRootSpaceInteraction->Clone());
+            worker->fRootSpaceInteraction->SetStep(worker->fStep);
+            
             worker->fRootSpaceNavigator = static_cast<KSRootSpaceNavigator*>(fRootSpaceNavigator->Clone());
+            worker->fRootSpaceNavigator->SetStep(worker->fStep);
+            
             worker->fRootSurfaceInteraction = static_cast<KSRootSurfaceInteraction*>(fRootSurfaceInteraction->Clone());
+            worker->fRootSurfaceInteraction->SetStep(worker->fStep);
+            
             worker->fRootSurfaceNavigator = static_cast<KSRootSurfaceNavigator*>(fRootSurfaceNavigator->Clone());
+            worker->fRootSurfaceNavigator->SetStep(worker->fStep);
+            
             worker->fRootTerminator = static_cast<KSRootTerminator*>(fRootTerminator->Clone());
+            worker->fRootTerminator->SetStep(worker->fStep);
+            
             worker->fRootStepModifier = static_cast<KSRootStepModifier*>(fRootStepModifier->Clone());
+            worker->fRootStepModifier->SetStep(worker->fStep);
+            
             worker->fRootTrackModifier = static_cast<KSRootTrackModifier*>(fRootTrackModifier->Clone());
+            worker->fRootTrackModifier->SetTrack(worker->fTrack);
+            
             worker->fRootEventModifier = static_cast<KSRootEventModifier*>(fRootEventModifier->Clone());
+            worker->fRootEventModifier->SetEvent(worker->fEvent);
 
             worker->fRestartNavigation = true;
 
@@ -502,6 +522,7 @@ void KSRoot::ExecuteRun()
             delete worker->fEvent;
             delete worker->fTrack;
             delete worker->fStep;
+            delete worker->fRootGenerator;
             delete worker->fRootTrajectory;
             delete worker->fRootSpaceInteraction;
             delete worker->fRootSpaceNavigator;
@@ -1434,15 +1455,8 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
 
     worker.fRootEventModifier->ExecutePreEventModification();
 
-    // Generate primaries (needs to be thread-safe)
-    fQueueMutex.Lock();
-    fRootGenerator->ExecuteGeneration();
-    // Move generated particles to this worker's event queue
-    while (!fEvent->ParticleQueue().empty()) {
-        worker.fEvent->ParticleQueue().push_back(fEvent->ParticleQueue().front());
-        fEvent->ParticleQueue().pop_front();
-    }
-    fQueueMutex.Unlock();
+    // Generate primaries using worker's generator (thread-safe with own clone)
+    worker.fRootGenerator->ExecuteGeneration();
 
     // Clear any internal trajectory state
     worker.fRootTrajectory->Reset();

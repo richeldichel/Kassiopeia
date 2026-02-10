@@ -59,6 +59,7 @@ class KSRoot : public KSComponentTemplate<KSRoot>
         KSEvent* fEvent;
         KSTrack* fTrack;
         KSStep* fStep;
+        KSRootGenerator* fRootGenerator;
         KSRootTrajectory* fRootTrajectory;
         KSRootSpaceInteraction* fRootSpaceInteraction;
         KSRootSpaceNavigator* fRootSpaceNavigator;
