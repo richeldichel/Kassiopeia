@@ -1384,13 +1384,14 @@ void KSRoot::ThreadWorkerFunction(unsigned int threadId)
         unsigned int eventId = 0;
         bool hasEvent = false;
 
-        fQueueMutex.Lock();
-        if (!fEventQueue.empty()) {
-            eventId = fEventQueue.front();
-            fEventQueue.pop_front();
-            hasEvent = true;
+        {
+            KSMutexLock lock(fQueueMutex);
+            if (!fEventQueue.empty()) {
+                eventId = fEventQueue.front();
+                fEventQueue.pop_front();
+                hasEvent = true;
+            }
         }
-        fQueueMutex.Unlock();
 
         if (!hasEvent) {
             // No more events, exit
@@ -1407,20 +1408,21 @@ void KSRoot::ThreadWorkerFunction(unsigned int threadId)
             ExecuteEventParallel(worker);
 
             // Update run statistics (thread-safe)
-            fRunUpdateMutex.Lock();
-            fRun->TotalEvents() += 1;
-            fRun->TotalTracks() += worker.fEvent->TotalTracks();
-            fRun->TotalSteps() += worker.fEvent->TotalSteps();
-            fRun->ContinuousTime() += worker.fEvent->ContinuousTime();
-            fRun->ContinuousLength() += worker.fEvent->ContinuousLength();
-            fRun->ContinuousEnergyChange() += worker.fEvent->ContinuousEnergyChange();
-            fRun->ContinuousMomentumChange() += worker.fEvent->ContinuousMomentumChange();
-            fRun->DiscreteEnergyChange() += worker.fEvent->DiscreteEnergyChange();
-            fRun->DiscreteMomentumChange() += worker.fEvent->DiscreteMomentumChange();
-            fRun->DiscreteSecondaries() += worker.fEvent->DiscreteSecondaries();
-            fRun->NumberOfTurns() += worker.fEvent->NumberOfTurns();
-            fEventsCompleted++;
-            fRunUpdateMutex.Unlock();
+            {
+                KSMutexLock lock(fRunUpdateMutex);
+                fRun->TotalEvents() += 1;
+                fRun->TotalTracks() += worker.fEvent->TotalTracks();
+                fRun->TotalSteps() += worker.fEvent->TotalSteps();
+                fRun->ContinuousTime() += worker.fEvent->ContinuousTime();
+                fRun->ContinuousLength() += worker.fEvent->ContinuousLength();
+                fRun->ContinuousEnergyChange() += worker.fEvent->ContinuousEnergyChange();
+                fRun->ContinuousMomentumChange() += worker.fEvent->ContinuousMomentumChange();
+                fRun->DiscreteEnergyChange() += worker.fEvent->DiscreteEnergyChange();
+                fRun->DiscreteMomentumChange() += worker.fEvent->DiscreteMomentumChange();
+                fRun->DiscreteSecondaries() += worker.fEvent->DiscreteSecondaries();
+                fRun->NumberOfTurns() += worker.fEvent->NumberOfTurns();
+                fEventsCompleted++;
+            }
         }
         catch (KSUserInterrupt const& e) {
             stepmsg(eInfo) << "Interrupted thread " << threadId << " at event <" << eventId << "> (" << e.what()
@@ -1527,13 +1529,14 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
     worker.fEvent->EndTiming();
 
     // Write event (thread-safe)
-    fWriterMutex.Lock();
-    worker.fEvent->PushUpdate();
-    worker.fRootEventModifier->PushUpdate();
-    fRootWriter->ExecuteEvent();
-    worker.fEvent->PushDeupdate();
-    worker.fRootEventModifier->PushDeupdate();
-    fWriterMutex.Unlock();
+    {
+        KSMutexLock lock(fWriterMutex);
+        worker.fEvent->PushUpdate();
+        worker.fRootEventModifier->PushUpdate();
+        fRootWriter->ExecuteEvent();
+        worker.fEvent->PushDeupdate();
+        worker.fRootEventModifier->PushDeupdate();
+    }
 
     auto tTimeSpan = worker.fEvent->GetProcessingDuration();
     fTotalExecTime += tTimeSpan;
@@ -1601,13 +1604,14 @@ void KSRoot::ExecuteTrackParallel(EventWorker& worker)
     worker.fTrack->EndTiming();
 
     // Write track (thread-safe)
-    fWriterMutex.Lock();
-    worker.fTrack->PushUpdate();
-    worker.fRootTrackModifier->PushUpdate();
-    fRootWriter->ExecuteTrack();
-    worker.fTrack->PushDeupdate();
-    worker.fRootTrackModifier->PushDeupdate();
-    fWriterMutex.Unlock();
+    {
+        KSMutexLock lock(fWriterMutex);
+        worker.fTrack->PushUpdate();
+        worker.fRootTrackModifier->PushUpdate();
+        fRootWriter->ExecuteTrack();
+        worker.fTrack->PushDeupdate();
+        worker.fRootTrackModifier->PushDeupdate();
+    }
 
     fStopTrackSignal = false;
 }
@@ -1660,13 +1664,14 @@ void KSRoot::ExecuteStepParallel(EventWorker& worker)
     worker.fTrack->FinalParticle() = worker.fStep->FinalParticle();
 
     // Write step (thread-safe)
-    fWriterMutex.Lock();
-    worker.fStep->PushUpdate();
-    worker.fRootStepModifier->PushUpdate();
-    fRootWriter->ExecuteStep();
-    worker.fStep->PushDeupdate();
-    worker.fRootStepModifier->PushDeupdate();
-    fWriterMutex.Unlock();
+    {
+        KSMutexLock lock(fWriterMutex);
+        worker.fStep->PushUpdate();
+        worker.fRootStepModifier->PushUpdate();
+        fRootWriter->ExecuteStep();
+        worker.fStep->PushDeupdate();
+        worker.fRootStepModifier->PushDeupdate();
+    }
 }
 
 }  // namespace Kassiopeia
