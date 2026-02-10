@@ -66,7 +66,6 @@ const unsigned int& KSSimulation::GetStepReportIteration() const
 void KSSimulation::SetNumberOfThreads(const unsigned int& aThreadCount)
 {
     fNumberOfThreads = aThreadCount;
-    return;
 }
 const unsigned int& KSSimulation::GetNumberOfThreads() const
 {

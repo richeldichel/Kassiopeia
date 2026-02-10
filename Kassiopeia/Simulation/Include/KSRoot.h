@@ -132,7 +132,7 @@ class KSRoot : public KSComponentTemplate<KSRoot>
     KSMutex fQueueMutex;
     KSMutex fRunUpdateMutex;
     KSMutex fWriterMutex;
-    bool fThreadsActive;
+    std::atomic<bool> fThreadsActive;
     unsigned int fEventsCompleted;
 };
 
