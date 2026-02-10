@@ -231,6 +231,7 @@
             run="1"
             seed="51385"
             events="[events:1]"
+            number_of_threads="[threads:1]"
             magnetic_field="field_magnetic_constant"
             electric_field="field_electric_quadrupole"
             space="space_world"
