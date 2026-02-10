@@ -45,9 +45,9 @@ using namespace katrin;
 
 namespace Kassiopeia
 {
-bool KSRoot::fStopRunSignal = false;
-bool KSRoot::fStopEventSignal = false;
-bool KSRoot::fStopTrackSignal = false;
+std::atomic<bool> KSRoot::fStopRunSignal(false);
+std::atomic<bool> KSRoot::fStopEventSignal(false);
+std::atomic<bool> KSRoot::fStopTrackSignal(false);
 
 KSRoot::KSRoot() :
     fSimulation(nullptr),
@@ -1539,7 +1539,12 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
     }
 
     auto tTimeSpan = worker.fEvent->GetProcessingDuration();
-    fTotalExecTime += tTimeSpan;
+    
+    // Update total execution time (thread-safe)
+    {
+        KSMutexLock lock(fRunUpdateMutex);
+        fTotalExecTime += tTimeSpan;
+    }
 }
 
 void KSRoot::ExecuteTrackParallel(EventWorker& worker)

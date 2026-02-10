@@ -6,6 +6,7 @@
 #include "KSMutex.h"
 #include "KToolbox.h"
 
+#include <atomic>
 #include <deque>
 #include <memory>
 #include <thread>
@@ -120,9 +121,9 @@ class KSRoot : public KSComponentTemplate<KSRoot>
 
     double fTotalExecTime;
 
-    static bool fStopRunSignal;
-    static bool fStopEventSignal;
-    static bool fStopTrackSignal;
+    static std::atomic<bool> fStopRunSignal;
+    static std::atomic<bool> fStopEventSignal;
+    static std::atomic<bool> fStopTrackSignal;
 
     // Thread pool for parallel event processing
     std::vector<std::thread> fThreadPool;
