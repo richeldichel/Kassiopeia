@@ -1,39 +1,81 @@
 # Parallelization Implementation Status
 
-## Completed Features
+## Current Status: Infrastructure Only (Sequential Execution)
 
-### Core Parallelization ✅
+**Important**: While the parallelization infrastructure is implemented, events currently execute **sequentially** (one at a time) due to extensive shared state in the codebase. Setting `number_of_threads > 1` creates worker threads, but they process events serially via mutex.
+
+### Why Sequential?
+
+The existing simulation code uses shared member variables extensively throughout ExecuteStep/ExecuteTrack:
+- `ExecuteStep` is 1000+ lines using 10+ shared members (`fStep`, `fTrack`, `fRootTrajectory`, `fRootSpace`, etc.)
+- Complex state management with intricate navigation and interaction logic  
+- Per-thread context switching requires saving/restoring all shared state
+- Multiple threads modifying shared pointers creates race conditions
+
+**Result**: ExecuteEventParallel currently wraps ExecuteEvent with a mutex, making execution sequential.
+
+## Implemented Infrastructure
+
+### Core Infrastructure ✅
 - [x] Thread pool implementation in KSRoot
-- [x] Event-level parallelization with worker threads
+- [x] Event worker structures
 - [x] Configurable thread count via XML (`number_of_threads` parameter)
 - [x] Default single-threaded behavior (backwards compatible)
 
-### Thread Safety ✅
+### Thread Safety Components ✅
 - [x] Exception-safe RAII mutex guards (KSMutexLock)
 - [x] Atomic variables for all control signals
 - [x] Mutex-protected file I/O (writers)
 - [x] Mutex-protected run statistics updates
-- [x] Isolated worker state (cloned components per thread)
 
-### Component Cloning ✅
-- [x] Generator cloning per thread
-- [x] Trajectory cloning per thread
-- [x] Space/Surface interaction cloning per thread
-- [x] Space/Surface navigator cloning per thread
-- [x] Terminator cloning per thread
-- [x] Step/Track/Event modifier cloning per thread
-- [x] Event/Track/Step object cloning per thread
+### Component Cloning (Not Used) ⚠️
+- [x] Generator cloning per thread (infrastructure exists)
+- [x] Trajectory cloning per thread (infrastructure exists)
+- [x] Other component cloning (infrastructure exists)
+- ⚠️ **Note**: Cloned components are created but not actively used due to sequential execution
 
 ### Documentation ✅
-- [x] Comprehensive PARALLELIZATION.md guide
+- [x] PARALLELIZATION.md guide
 - [x] Updated simulation.rst documentation
 - [x] Example XML configuration
-- [x] Limitations clearly documented
-- [x] Field cache safety warnings
+- [x] Limitations documented
+- [x] Build fixed and compiling
 
-## Known Limitations & Recommendations
+## Path to True Parallelization
 
-### 1. Field Solver Caching ⚠️
+To enable actual parallel execution, significant refactoring is required:
+
+### Option A: Stateless Execution
+Refactor ExecuteStep/ExecuteTrack to not use member variables:
+```cpp
+// Instead of: void ExecuteStep()
+// Do: void ExecuteStep(KSStep* step, KSTrack* track, KSRootTrajectory* traj, ...)
+```
+**Effort**: High (touches 1000+ lines, many call sites)
+
+### Option B: Thread-Local State
+Use thread-local storage for simulation state:
+```cpp
+thread_local KSStep* g_currentStep;
+thread_local KSTrack* g_currentTrack;
+// etc.
+```
+**Effort**: Medium (less invasive but requires careful management)
+
+### Option C: Lock-Free Structures
+Implement lock-free data structures for all shared state.
+**Effort**: Very High (complex, error-prone)
+
+**Estimated Timeline**: Weeks to months of development + testing
+
+## Current Limitations
+
+### 1. Sequential Execution 🔴
+**Issue**: Events execute one at a time despite thread pool.
+**Impact**: No performance benefit from parallelization.
+**Workaround**: None - this is fundamental to current implementation.
+
+### 2. Field Solver Caching ⚠️
 
 **Issue**: Electric and magnetic field objects are shared across all threads.
 
@@ -42,25 +84,14 @@
 - Multiple threads accessing the same cache can cause data corruption
 - No mutex protection on field calculation caches
 
+**Issue**: Events execute sequentially (serialized by mutex).
+
 **Recommendation**:
-- ✅ **Safe**: Simple analytic fields without caching
-- ⚠️ **Unsafe**: KEMField cached charge density solvers
-- 💡 **Action**: Use `number_of_threads="1"` for cached field solvers
+- Current implementation has no performance benefit
+- Setting `number_of_threads > 1` has no effect on speed
+- Keep default `number_of_threads="1"` until true parallelization is implemented
 
-**Future Work**:
-```cpp
-// Option 1: Add mutex protection to field classes
-class KElectricField {
-    mutable KSMutex fCacheMutex;
-    // Protect all cache accesses
-};
-
-// Option 2: Clone fields for each thread
-worker->fRootMagneticField = fRootMagneticField->Clone();
-worker->fRootElectricField = fRootElectricField->Clone();
-```
-
-### 2. Random Number Generation ℹ️
+### 3. Random Number Generation ℹ️
 
 **Issue**: Global KRandom singleton shared across threads.
 
