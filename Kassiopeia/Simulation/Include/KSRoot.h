@@ -3,7 +3,13 @@
 
 #include "KSComponentTemplate.h"
 #include "KSMainMessage.h"
+#include "KSMutex.h"
 #include "KToolbox.h"
+
+#include <deque>
+#include <memory>
+#include <thread>
+#include <vector>
 
 namespace Kassiopeia
 {
@@ -45,6 +51,31 @@ class KSRoot : public KSComponentTemplate<KSRoot>
     void ExecuteEvent();
     void ExecuteTrack();
     void ExecuteStep();
+
+  private:
+    // Thread worker structure for parallel event processing
+    struct EventWorker
+    {
+        KSEvent* fEvent;
+        KSTrack* fTrack;
+        KSStep* fStep;
+        KSRootTrajectory* fRootTrajectory;
+        KSRootSpaceInteraction* fRootSpaceInteraction;
+        KSRootSpaceNavigator* fRootSpaceNavigator;
+        KSRootSurfaceInteraction* fRootSurfaceInteraction;
+        KSRootSurfaceNavigator* fRootSurfaceNavigator;
+        KSRootTerminator* fRootTerminator;
+        KSRootStepModifier* fRootStepModifier;
+        KSRootTrackModifier* fRootTrackModifier;
+        KSRootEventModifier* fRootEventModifier;
+        unsigned int fEventIndex;
+        bool fRestartNavigation;
+    };
+
+    void ExecuteEventParallel(EventWorker& worker);
+    void ExecuteTrackParallel(EventWorker& worker);
+    void ExecuteStepParallel(EventWorker& worker);
+    void ThreadWorkerFunction(unsigned int threadId);
 
   protected:
     void ActivateComponent() override;
@@ -91,6 +122,16 @@ class KSRoot : public KSComponentTemplate<KSRoot>
     static bool fStopRunSignal;
     static bool fStopEventSignal;
     static bool fStopTrackSignal;
+
+    // Thread pool for parallel event processing
+    std::vector<std::thread> fThreadPool;
+    std::vector<std::unique_ptr<EventWorker>> fEventWorkers;
+    std::deque<unsigned int> fEventQueue;
+    KSMutex fQueueMutex;
+    KSMutex fRunUpdateMutex;
+    KSMutex fWriterMutex;
+    bool fThreadsActive;
+    unsigned int fEventsCompleted;
 };
 
 }  // namespace Kassiopeia

@@ -34,6 +34,9 @@ class KSSimulation : public KSComponentTemplate<KSSimulation>
     void SetStepReportIteration(const unsigned int& anIteration);
     const unsigned int& GetStepReportIteration() const;
 
+    void SetNumberOfThreads(const unsigned int& aThreadCount);
+    const unsigned int& GetNumberOfThreads() const;
+
     void AddCommand(KSCommand* aCommand);
     void RemoveCommand(KSCommand* aCommand);
 
@@ -82,6 +85,7 @@ class KSSimulation : public KSComponentTemplate<KSSimulation>
     unsigned int fRun;
     unsigned int fEvents;
     unsigned int fStepReportIteration;
+    unsigned int fNumberOfThreads;
     std::vector<KSCommand*> fCommands;
     std::vector<KSRunModifier*> fStaticRunModifiers;
     std::vector<KSEventModifier*> fStaticEventModifiers;
