@@ -41,6 +41,9 @@ This can significantly improve performance on multi-core systems. Note that when
 * File I/O operations (writers) are automatically protected by mutexes to prevent conflicts
 * The random number generator is synchronized during particle generation to maintain reproducibility
 * For best performance, set ``number_of_threads`` to match the number of available CPU cores
+* **Important**: If using cached field solvers (e.g., KEMField cached charge density solvers), parallelization may cause 
+  race conditions. Use single-threaded mode (``number_of_threads="1"``) until thread-safe field caching is implemented.
+* For simple analytic fields without caching, parallel mode should be safe to use
 
 The remaining parameters ``magnetic_field``, ``space``, ``generator``, etc. all specify the default
 objects to be used for the initial state of the simulation; where commands specified within ``ksgeo_space`` may

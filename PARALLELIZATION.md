@@ -54,7 +54,12 @@ The parallelization is implemented at the event level:
    - This is because random numbers are consumed in a non-deterministic order due to thread scheduling
    - For exact reproducibility, use `number_of_threads="1"` (single-threaded mode)
    - Statistical distributions across large numbers of events should remain consistent
-3. **Cache Sharing**: File caches and other shared resources are accessed through mutex locks
+3. **Field Solver Caches**: Electric and magnetic field solvers may have internal caches
+   - **IMPORTANT**: Current implementation shares field objects across threads
+   - Field calculations should be thread-safe (read-only after initialization)
+   - However, if field solvers use caching, this could cause race conditions
+   - For simulations using cached field solvers, single-threaded mode is recommended until thread-safe caching is implemented
+4. **Cache Sharing**: File caches and other shared resources are accessed through mutex locks
 
 ## Examples
 
@@ -112,8 +117,39 @@ Key files modified:
 
 Potential enhancements for future versions:
 
-1. Thread-local random number generators for better independence
-2. Lock-free queue for better queue performance
-3. Parallel I/O using separate output files per thread
-4. Work stealing for better load balancing
-5. GPU acceleration for trajectory calculations
+1. **Thread-Safe Field Caching**: Add mutex protection to field solver caches
+   - Clone field objects for each thread with independent caches
+   - Implement lock-free cache data structures for better performance
+   - Add thread-local caching for field calculations
+2. **Thread-Local Random Number Generators**: Provide independent RNG for each thread
+   - Better statistical independence between events
+   - Improved reproducibility in parallel mode
+3. **Lock-Free Queue**: Replace mutex-protected event queue with lock-free implementation
+   - Better queue performance and scalability
+4. **Parallel I/O**: Support separate output files per thread
+   - Reduce I/O bottleneck
+   - Merge files after simulation completes
+5. **Work Stealing**: Implement work stealing for better load balancing
+   - Handle variable event processing times more efficiently
+6. **GPU Acceleration**: Offload trajectory calculations to GPU
+   - Potential for massive parallelization of physics calculations
+
+### Field Solver Thread Safety (Priority)
+
+The current implementation shares electric and magnetic field objects across all threads. While this works for simple field configurations, it may cause issues with cached field solvers:
+
+**Known Issues:**
+- KEMField cached charge density solvers may have race conditions
+- Field calculation caches are not mutex-protected
+- Multiple threads accessing the same cache simultaneously can cause data corruption
+
+**Recommended Actions:**
+1. For cached field solvers: Use single-threaded mode (`number_of_threads="1"`)
+2. For simple/analytic fields without caching: Parallel mode should be safe
+3. Future work: Add mutex protection or thread-local caches to field solvers
+
+**Implementation Plan:**
+- Add `KSMutex` members to field solver classes that use caching
+- Protect cache read/write operations with RAII lock guards
+- Consider cloning field objects for each thread with independent caches
+- Performance testing to measure mutex contention impact

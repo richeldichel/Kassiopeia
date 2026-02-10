@@ -133,7 +133,7 @@ class KSRoot : public KSComponentTemplate<KSRoot>
     KSMutex fRunUpdateMutex;
     KSMutex fWriterMutex;
     std::atomic<bool> fThreadsActive;
-    unsigned int fEventsCompleted;
+    std::atomic<unsigned int> fEventsCompleted;
 };
 
 }  // namespace Kassiopeia
