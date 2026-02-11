@@ -1474,13 +1474,17 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
 
     fEvent->StartTiming();
 
-    fRootEventModifier->ExecutePreEventModification();
+    // Protect calls to shared root components that may have internal state
+    {
+        KSMutexLock componentLock(fComponentMutex);
+        fRootEventModifier->ExecutePreEventModification();
 
-    // Generate primaries
-    fRootGenerator->ExecuteGeneration();
+        // Generate primaries - this MUST be protected as generators have internal state
+        fRootGenerator->ExecuteGeneration();
 
-    // Clear any internal trajectory state
-    fRootTrajectory->Reset();
+        // Clear any internal trajectory state
+        fRootTrajectory->Reset();
+    }
     fRestartNavigation = true;
 
     // Clear any previous GSL errors
@@ -1541,7 +1545,11 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
         fEvent->NumberOfTurns() += fTrack->NumberOfTurns();
     }
 
-    fRootEventModifier->ExecutePostEventModification();
+    // Protect modifier call
+    {
+        KSMutexLock componentLock(fComponentMutex);
+        fRootEventModifier->ExecutePostEventModification();
+    }
 
     fEvent->EndTiming();
 

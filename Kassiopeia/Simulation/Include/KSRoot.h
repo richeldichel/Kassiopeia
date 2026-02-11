@@ -131,6 +131,7 @@ class KSRoot : public KSComponentTemplate<KSRoot>
     KSMutex fQueueMutex;
     KSMutex fRunUpdateMutex;
     KSMutex fWriterMutex;
+    KSMutex fComponentMutex;  // Protects calls to shared root components
     std::atomic<bool> fThreadsActive;
     std::atomic<unsigned int> fEventsCompleted;
 };
