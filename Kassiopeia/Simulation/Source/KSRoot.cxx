@@ -1427,8 +1427,10 @@ void KSRoot::ThreadWorkerFunction(unsigned int threadId)
 
 void KSRoot::ExecuteEventParallel(EventWorker& worker)
 {
-    // Only protect operations that MUST be serialized
-    // Most of event execution can run in parallel
+    // Serialize entire event execution to prevent component race conditions
+    // Components have internal mutable state and Clone() does shallow copy
+    // This ensures thread safety at the cost of serialization
+    KSMutexLock componentLock(fComponentMutex);
     
     // Save current context (local variables - thread-safe)
     KSEvent* savedEvent;
