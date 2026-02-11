@@ -456,7 +456,7 @@ void KSRoot::ExecuteRun()
         for (unsigned int i = 0; i < numThreads; i++) {
             auto worker = std::make_unique<EventWorker>();
 
-            // Clone necessary objects for each thread
+            // Create data containers for each thread (these are per-worker)
             worker->fEvent = new KSEvent();
             worker->fEvent->SetName("event_worker_" + std::to_string(i));
 
@@ -466,36 +466,20 @@ void KSRoot::ExecuteRun()
             worker->fStep = new KSStep();
             worker->fStep->SetName("step_worker_" + std::to_string(i));
 
-            // Clone root components (these need to be thread-safe)
-            worker->fRootGenerator = static_cast<KSRootGenerator*>(fRootGenerator->Clone());
-            worker->fRootGenerator->SetEvent(worker->fEvent);
-            
-            worker->fRootTrajectory = static_cast<KSRootTrajectory*>(fRootTrajectory->Clone());
-            worker->fRootTrajectory->SetStep(worker->fStep);
-            
-            worker->fRootSpaceInteraction = static_cast<KSRootSpaceInteraction*>(fRootSpaceInteraction->Clone());
-            worker->fRootSpaceInteraction->SetStep(worker->fStep);
-            
-            worker->fRootSpaceNavigator = static_cast<KSRootSpaceNavigator*>(fRootSpaceNavigator->Clone());
-            worker->fRootSpaceNavigator->SetStep(worker->fStep);
-            
-            worker->fRootSurfaceInteraction = static_cast<KSRootSurfaceInteraction*>(fRootSurfaceInteraction->Clone());
-            worker->fRootSurfaceInteraction->SetStep(worker->fStep);
-            
-            worker->fRootSurfaceNavigator = static_cast<KSRootSurfaceNavigator*>(fRootSurfaceNavigator->Clone());
-            worker->fRootSurfaceNavigator->SetStep(worker->fStep);
-            
-            worker->fRootTerminator = static_cast<KSRootTerminator*>(fRootTerminator->Clone());
-            worker->fRootTerminator->SetStep(worker->fStep);
-            
-            worker->fRootStepModifier = static_cast<KSRootStepModifier*>(fRootStepModifier->Clone());
-            worker->fRootStepModifier->SetStep(worker->fStep);
-            
-            worker->fRootTrackModifier = static_cast<KSRootTrackModifier*>(fRootTrackModifier->Clone());
-            worker->fRootTrackModifier->SetTrack(worker->fTrack);
-            
-            worker->fRootEventModifier = static_cast<KSRootEventModifier*>(fRootEventModifier->Clone());
-            worker->fRootEventModifier->SetEvent(worker->fEvent);
+            // Share root components (these are thread-safe when operating on different data)
+            // NOTE: We don't clone these because Clone() does shallow copies of internal pointers,
+            // which causes double-free errors when workers are destroyed.
+            // The root components are stateless processors that operate on the data passed to them.
+            worker->fRootGenerator = fRootGenerator;
+            worker->fRootTrajectory = fRootTrajectory;
+            worker->fRootSpaceInteraction = fRootSpaceInteraction;
+            worker->fRootSpaceNavigator = fRootSpaceNavigator;
+            worker->fRootSurfaceInteraction = fRootSurfaceInteraction;
+            worker->fRootSurfaceNavigator = fRootSurfaceNavigator;
+            worker->fRootTerminator = fRootTerminator;
+            worker->fRootStepModifier = fRootStepModifier;
+            worker->fRootTrackModifier = fRootTrackModifier;
+            worker->fRootEventModifier = fRootEventModifier;
 
             worker->fRestartNavigation = true;
 
@@ -520,19 +504,11 @@ void KSRoot::ExecuteRun()
 
         // Clean up workers
         for (auto& worker : fEventWorkers) {
+            // Only delete the data containers (Event, Track, Step)
+            // Root components are shared and managed by KSRoot, not by workers
             delete worker->fEvent;
             delete worker->fTrack;
             delete worker->fStep;
-            delete worker->fRootGenerator;
-            delete worker->fRootTrajectory;
-            delete worker->fRootSpaceInteraction;
-            delete worker->fRootSpaceNavigator;
-            delete worker->fRootSurfaceInteraction;
-            delete worker->fRootSurfaceNavigator;
-            delete worker->fRootTerminator;
-            delete worker->fRootStepModifier;
-            delete worker->fRootTrackModifier;
-            delete worker->fRootEventModifier;
         }
         fEventWorkers.clear();
         fThreadPool.clear();
@@ -1447,16 +1423,6 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
     KSEvent* savedEvent;
     KSTrack* savedTrack;
     KSStep* savedStep;
-    KSRootGenerator* savedGenerator;
-    KSRootTrajectory* savedTrajectory;
-    KSRootSpaceInteraction* savedSpaceInteraction;
-    KSRootSpaceNavigator* savedSpaceNavigator;
-    KSRootSurfaceInteraction* savedSurfaceInteraction;
-    KSRootSurfaceNavigator* savedSurfaceNavigator;
-    KSRootTerminator* savedTerminator;
-    KSRootStepModifier* savedStepModifier;
-    KSRootTrackModifier* savedTrackModifier;
-    KSRootEventModifier* savedEventModifier;
     bool savedRestartNavigation;
     
     // Critical section: swap context pointers (must be atomic per-thread)
@@ -1466,33 +1432,26 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
         savedEvent = fEvent;
         savedTrack = fTrack;
         savedStep = fStep;
-        savedGenerator = fRootGenerator;
-        savedTrajectory = fRootTrajectory;
-        savedSpaceInteraction = fRootSpaceInteraction;
-        savedSpaceNavigator = fRootSpaceNavigator;
-        savedSurfaceInteraction = fRootSurfaceInteraction;
-        savedSurfaceNavigator = fRootSurfaceNavigator;
-        savedTerminator = fRootTerminator;
-        savedStepModifier = fRootStepModifier;
-        savedTrackModifier = fRootTrackModifier;
-        savedEventModifier = fRootEventModifier;
         savedRestartNavigation = fRestartNavigation;
         
-        // Switch to worker's context
+        // Switch to worker's context (data containers)
         fEvent = worker.fEvent;
         fTrack = worker.fTrack;
         fStep = worker.fStep;
-        fRootGenerator = worker.fRootGenerator;
-        fRootTrajectory = worker.fRootTrajectory;
-        fRootSpaceInteraction = worker.fRootSpaceInteraction;
-        fRootSpaceNavigator = worker.fRootSpaceNavigator;
-        fRootSurfaceInteraction = worker.fRootSurfaceInteraction;
-        fRootSurfaceNavigator = worker.fRootSurfaceNavigator;
-        fRootTerminator = worker.fRootTerminator;
-        fRootStepModifier = worker.fRootStepModifier;
-        fRootTrackModifier = worker.fRootTrackModifier;
-        fRootEventModifier = worker.fRootEventModifier;
         fRestartNavigation = worker.fRestartNavigation;
+        
+        // Configure shared root components to use worker's data
+        // These calls are thread-safe because each worker has its own data containers
+        fRootGenerator->SetEvent(worker.fEvent);
+        fRootTrajectory->SetStep(worker.fStep);
+        fRootSpaceInteraction->SetStep(worker.fStep);
+        fRootSpaceNavigator->SetStep(worker.fStep);
+        fRootSurfaceInteraction->SetStep(worker.fStep);
+        fRootSurfaceNavigator->SetStep(worker.fStep);
+        fRootTerminator->SetStep(worker.fStep);
+        fRootStepModifier->SetStep(worker.fStep);
+        fRootTrackModifier->SetTrack(worker.fTrack);
+        fRootEventModifier->SetEvent(worker.fEvent);
     }
     // Context lock released - now execute in parallel with worker's context
     
@@ -1615,17 +1574,26 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
         fEvent = savedEvent;
         fTrack = savedTrack;
         fStep = savedStep;
-        fRootGenerator = savedGenerator;
-        fRootTrajectory = savedTrajectory;
-        fRootSpaceInteraction = savedSpaceInteraction;
-        fRootSpaceNavigator = savedSpaceNavigator;
-        fRootSurfaceInteraction = savedSurfaceInteraction;
-        fRootSurfaceNavigator = savedSurfaceNavigator;
-        fRootTerminator = savedTerminator;
-        fRootStepModifier = savedStepModifier;
-        fRootTrackModifier = savedTrackModifier;
-        fRootEventModifier = savedEventModifier;
         fRestartNavigation = savedRestartNavigation;
+        
+        // Restore root components to use original data containers
+        // This is important to avoid dangling pointers when worker is destroyed
+        if (savedEvent != nullptr) {
+            fRootGenerator->SetEvent(savedEvent);
+            fRootEventModifier->SetEvent(savedEvent);
+        }
+        if (savedTrack != nullptr) {
+            fRootTrackModifier->SetTrack(savedTrack);
+        }
+        if (savedStep != nullptr) {
+            fRootTrajectory->SetStep(savedStep);
+            fRootSpaceInteraction->SetStep(savedStep);
+            fRootSpaceNavigator->SetStep(savedStep);
+            fRootSurfaceInteraction->SetStep(savedStep);
+            fRootSurfaceNavigator->SetStep(savedStep);
+            fRootTerminator->SetStep(savedStep);
+            fRootStepModifier->SetStep(savedStep);
+        }
     }
     
     fStopEventSignal = false;
