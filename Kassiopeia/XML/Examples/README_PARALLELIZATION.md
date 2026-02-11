@@ -14,10 +14,10 @@ By default, simulations run with a single thread (sequential execution). To enab
 
 ```bash
 # Run with 4 threads
-Kassiopeia DipoleTrapSimulation.xml --override threads=4
+Kassiopeia DipoleTrapSimulation.xml threads=4
 
 # Run with 8 threads
-Kassiopeia QuadrupoleTrapSimulation.xml --override threads=8
+Kassiopeia QuadrupoleTrapSimulation.xml threads=8
 
 # Run with default (1 thread, sequential)
 Kassiopeia AnalyticSimulation.xml
@@ -39,7 +39,7 @@ The `number_of_threads` parameter is configured in each simulation file as:
 The `[threads:1]` syntax means:
 - Variable name: `threads`
 - Default value: `1` (single-threaded)
-- Can be overridden via command line with `--override threads=<N>`
+- Can be overridden via command line with `-r threads=<N>`
 
 ### Recommended Thread Counts
 
@@ -49,7 +49,7 @@ The `[threads:1]` syntax means:
 
 Example for a 4-core system:
 ```bash
-Kassiopeia DipoleTrapSimulation.xml --override events=1000 --override threads=4
+Kassiopeia DipoleTrapSimulation.xml -r events=1000 threads=4
 ```
 
 ## Performance Considerations
@@ -82,21 +82,21 @@ With optimal conditions:
 
 ```bash
 # Run 1000 events with 4 threads
-Kassiopeia DipoleTrapSimulation.xml --override events=1000 --override threads=4
+Kassiopeia DipoleTrapSimulation.xml -r events=1000 threads=4
 ```
 
 ### QuadrupoleTrapSimulation with Maximum Parallelization
 
 ```bash
 # Run 5000 events with 8 threads
-Kassiopeia QuadrupoleTrapSimulation.xml --override events=5000 --override threads=8
+Kassiopeia QuadrupoleTrapSimulation.xml -r events=5000 threads=8
 ```
 
 ### AnalyticSimulation (Best for Parallelization)
 
 ```bash
 # Analytic fields are thread-safe, good for parallel execution
-Kassiopeia AnalyticSimulation.xml --override events=10000 --override threads=8
+Kassiopeia AnalyticSimulation.xml -r events=10000 threads=8
 ```
 
 ## Limitations and Warnings

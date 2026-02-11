@@ -65,7 +65,14 @@ const unsigned int& KSSimulation::GetStepReportIteration() const
 
 void KSSimulation::SetNumberOfThreads(const unsigned int& aThreadCount)
 {
-    fNumberOfThreads = aThreadCount;
+    // Ensure at least 1 thread (0 is invalid)
+    if (aThreadCount == 0) {
+        mainmsg(eWarning) << "Number of threads must be at least 1, setting to 1" << eom;
+        fNumberOfThreads = 1;
+    }
+    else {
+        fNumberOfThreads = aThreadCount;
+    }
 }
 const unsigned int& KSSimulation::GetNumberOfThreads() const
 {

@@ -133,10 +133,9 @@ TEST_F(ParallelizationTest, ThreadCountBoundaries)
     simulation.SetNumberOfThreads(128);
     EXPECT_EQ(simulation.GetNumberOfThreads(), 128u);
     
-    // Test zero (should default to 1 or handle gracefully)
+    // Test zero (should be corrected to 1)
     simulation.SetNumberOfThreads(0);
-    // Implementation should handle this - either default to 1 or keep previous value
-    EXPECT_GE(simulation.GetNumberOfThreads(), 1u);
+    EXPECT_EQ(simulation.GetNumberOfThreads(), 1u);
 }
 
 /**
@@ -193,4 +192,28 @@ TEST_F(ParallelizationTest, DISABLED_PerformanceScaling)
     // 1. Run simulation with 1 thread, measure time
     // 2. Run simulation with 4 threads, measure time
     // 3. Verify speedup is reasonable (e.g., > 2x for 4 threads)
+}
+
+/**
+ * Integration test: Compare sequential vs parallel simulation results
+ * This test runs a small DipoleTrap-style simulation both sequentially and in parallel,
+ * then verifies that key statistics match (total tracks, total steps, etc.)
+ */
+TEST_F(ParallelizationTest, DISABLED_SequentialVsParallelComparison)
+{
+    // This is an integration test that would require:
+    // 1. Loading DipoleTrapSimulation.xml or similar
+    // 2. Running with threads=1
+    // 3. Running with threads=4
+    // 4. Comparing output statistics
+    // 
+    // Disabled by default as it requires full simulation infrastructure
+    // and XML file loading capabilities
+    //
+    // To enable: Remove DISABLED_ prefix and ensure XML files are accessible
+    // Expected behavior:
+    // - Total events should match
+    // - Total tracks should match
+    // - Statistical distributions should be similar (within tolerance)
+    // - Exact particle trajectories may differ due to RNG ordering
 }

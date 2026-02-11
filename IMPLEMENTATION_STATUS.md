@@ -146,10 +146,10 @@ Each worker thread has its own cloned simulation components. Before execution, t
 ### Example Test
 ```bash
 # Sequential baseline
-Kassiopeia simulation.xml --override ks_simulation.number_of_threads=1
+Kassiopeia simulation.xml -r ks_simulation.number_of_threads=1
 
 # Parallel execution  
-Kassiopeia simulation.xml --override ks_simulation.number_of_threads=4
+Kassiopeia simulation.xml -r ks_simulation.number_of_threads=4
 
 # Compare: Total events/tracks/steps should match
 # Performance: Should see ~3-4x speedup on 4 cores
@@ -237,10 +237,10 @@ workerRNG.SetSeed(baseSeed + threadId);
 ### Example Test Commands
 ```bash
 # Single-threaded baseline
-Kassiopeia simulation.xml --override ks_simulation.number_of_threads=1
+Kassiopeia simulation.xml -r ks_simulation.number_of_threads=1
 
 # Multi-threaded test
-Kassiopeia simulation.xml --override ks_simulation.number_of_threads=4
+Kassiopeia simulation.xml -r ks_simulation.number_of_threads=4
 
 # Compare outputs
 # Check: total events, tracks, steps should match
