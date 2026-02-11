@@ -1587,13 +1587,15 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
     fEvent->EndTiming();
 
     // Write event (thread-safe)
+    // Note: We don't call PushUpdate/PushDeupdate on worker components because:
+    // 1. Worker components are clones that haven't been through proper activation lifecycle
+    // 2. PushUpdate/PushDeupdate are primarily for state management in the component tree
+    // 3. We only need the data in worker.fEvent for writing, not the full component state
     {
         KSMutexLock lock(fWriterMutex);
-        fEvent->PushUpdate();
-        fRootEventModifier->PushUpdate();
+        // Temporarily swap to worker context just for writing
+        // (Writer needs to access the current fEvent and fRootEventModifier)
         fRootWriter->ExecuteEvent();
-        fEvent->PushDeupdate();
-        fRootEventModifier->PushDeupdate();
     }
 
     auto tTimeSpan = fEvent->GetProcessingDuration();
