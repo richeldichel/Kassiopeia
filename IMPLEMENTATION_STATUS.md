@@ -6,21 +6,28 @@
 
 ### How It Works
 
-Each worker thread has its own cloned simulation components. Before execution, the thread atomically swaps KSRoot's context pointers to use the worker's components. After execution, it restores the original pointers. This allows reuse of existing ExecuteTrack/ExecuteStep logic while maintaining thread isolation.
+Each worker thread has its own **data containers** (KSEvent, KSTrack, KSStep) but **shares root components** (processors like trajectory, navigator, etc.). Before execution, the thread atomically configures the shared root components to operate on its data containers. This allows reuse of existing ExecuteTrack/ExecuteStep logic while maintaining data isolation.
+
+**Key Architecture:**
+- **Per-Worker**: KSEvent, KSTrack, KSStep (data containers) - fully isolated
+- **Shared**: All fRoot* components (trajectory, navigator, interaction, etc.) - configured per-thread
+- Root components are stateless processors that operate on the data passed to them via SetEvent/SetTrack/SetStep
 
 **Execution Flow:**
 1. Thread acquires context mutex
-2. Swaps fEvent, fTrack, fStep, and all fRoot* pointers to worker's components  
-3. Releases context mutex
-4. Executes event/track/step processing **in parallel** with its own isolated state
-5. Acquires context mutex
-6. Restores original context pointers
-7. Releases context mutex
+2. Swaps fEvent, fTrack, fStep to worker's data containers
+3. Configures shared fRoot* components to use worker's data (SetEvent/SetTrack/SetStep)
+4. Releases context mutex
+5. Executes event/track/step processing **in parallel** with isolated data
+6. Acquires context mutex
+7. Restores original data container pointers
+8. Reconfigures shared components to use original data
+9. Releases context mutex
 
-**Parallel Section**: Physics calculations (trajectories, interactions, navigations) run concurrently.
+**Parallel Section**: Physics calculations (trajectories, interactions, navigations) run concurrently, each operating on its thread's isolated data.
 
 **Serialized Sections**: 
-- Context switching (~1% overhead)
+- Context switching and component reconfiguration (~1-5% overhead)
 - File I/O (necessary for correctness)
 - Run statistics updates (minimal)
 
@@ -38,17 +45,15 @@ Each worker thread has its own cloned simulation components. Before execution, t
 - [x] Mutex-protected context switching
 - [x] Mutex-protected file I/O (writers)
 - [x] Mutex-protected run statistics updates
-- [x] Isolated worker state (cloned components per thread)
+- [x] Isolated worker data (Event/Track/Step per thread)
+- [x] Shared root components configured per-thread via SetEvent/SetTrack/SetStep
 
-### Component Cloning ✅
-- [x] Generator cloning per thread
-- [x] Trajectory cloning per thread
-- [x] Space/Surface interaction cloning per thread
-- [x] Space/Surface navigator cloning per thread
-- [x] Terminator cloning per thread
-- [x] Step/Track/Event modifier cloning per thread
-- [x] Event/Track/Step object cloning per thread
-- ✅ **All cloned components actively used in parallel execution**
+### Worker Architecture ✅
+- [x] Per-worker data containers: KSEvent, KSTrack, KSStep (fully isolated)
+- [x] Shared root components: Generator, Trajectory, Navigators, Interactions, Terminators, Modifiers
+- [x] Root components are stateless processors configured to use worker's data
+- [x] No cloning of components (avoids shallow copy issues and double-free errors)
+- ✅ **Context switching reconfigures shared components for each worker**
 
 ### Documentation ✅
 - [x] PARALLELIZATION.md guide
@@ -67,14 +72,16 @@ Each worker thread has its own cloned simulation components. Before execution, t
 
 ### Bottlenecks
 1. **File I/O**: Serialized by mutex (can dominate for high output frequency)
-2. **Context Switch**: Brief mutex lock per event (~microseconds)
+2. **Context Reconfiguration**: Brief mutex lock per event to configure components (~microseconds)
 3. **Field Cache Contention**: If using cached field solvers (see limitations)
+4. **Component Configuration**: SetEvent/SetTrack/SetStep calls add small overhead
 
 ### Optimization Tips
 - Reduce output frequency to minimize I/O bottleneck
 - Use simple fields without caching when possible
 - Match thread count to physical CPU cores
 - Ensure sufficient events (>10x thread count) for good load balancing
+- Minimize component reconfiguration overhead by batch processing
 
 ## Remaining Limitations
 
