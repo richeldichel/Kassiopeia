@@ -466,20 +466,19 @@ void KSRoot::ExecuteRun()
             worker->fStep = new KSStep();
             worker->fStep->SetName("step_worker_" + std::to_string(i));
 
-            // Share root components (these are thread-safe when operating on different data)
-            // NOTE: We don't clone these because Clone() does shallow copies of internal pointers,
-            // which causes double-free errors when workers are destroyed.
-            // The root components are stateless processors that operate on the data passed to them.
-            worker->fRootGenerator = fRootGenerator;
-            worker->fRootTrajectory = fRootTrajectory;
-            worker->fRootSpaceInteraction = fRootSpaceInteraction;
-            worker->fRootSpaceNavigator = fRootSpaceNavigator;
-            worker->fRootSurfaceInteraction = fRootSurfaceInteraction;
-            worker->fRootSurfaceNavigator = fRootSurfaceNavigator;
-            worker->fRootTerminator = fRootTerminator;
-            worker->fRootStepModifier = fRootStepModifier;
-            worker->fRootTrackModifier = fRootTrackModifier;
-            worker->fRootEventModifier = fRootEventModifier;
+            // Clone root components for each worker thread
+            // Components are cloned AFTER initialization, so they're in a valid state
+            // Each worker gets its own component instances for true parallel execution
+            worker->fRootGenerator = (fRootGenerator != nullptr) ? fRootGenerator->Clone() : nullptr;
+            worker->fRootTrajectory = (fRootTrajectory != nullptr) ? fRootTrajectory->Clone() : nullptr;
+            worker->fRootSpaceInteraction = (fRootSpaceInteraction != nullptr) ? fRootSpaceInteraction->Clone() : nullptr;
+            worker->fRootSpaceNavigator = (fRootSpaceNavigator != nullptr) ? fRootSpaceNavigator->Clone() : nullptr;
+            worker->fRootSurfaceInteraction = (fRootSurfaceInteraction != nullptr) ? fRootSurfaceInteraction->Clone() : nullptr;
+            worker->fRootSurfaceNavigator = (fRootSurfaceNavigator != nullptr) ? fRootSurfaceNavigator->Clone() : nullptr;
+            worker->fRootTerminator = (fRootTerminator != nullptr) ? fRootTerminator->Clone() : nullptr;
+            worker->fRootStepModifier = (fRootStepModifier != nullptr) ? fRootStepModifier->Clone() : nullptr;
+            worker->fRootTrackModifier = (fRootTrackModifier != nullptr) ? fRootTrackModifier->Clone() : nullptr;
+            worker->fRootEventModifier = (fRootEventModifier != nullptr) ? fRootEventModifier->Clone() : nullptr;
 
             worker->fRestartNavigation = true;
 
@@ -503,12 +502,24 @@ void KSRoot::ExecuteRun()
         fThreadsActive = false;
 
         // Clean up workers
+        // Clean up worker objects
         for (auto& worker : fEventWorkers) {
-            // Only delete the data containers (Event, Track, Step)
-            // Root components are shared and managed by KSRoot, not by workers
+            // Delete data containers
             delete worker->fEvent;
             delete worker->fTrack;
             delete worker->fStep;
+            
+            // Delete cloned components
+            delete worker->fRootGenerator;
+            delete worker->fRootTrajectory;
+            delete worker->fRootSpaceInteraction;
+            delete worker->fRootSpaceNavigator;
+            delete worker->fRootSurfaceInteraction;
+            delete worker->fRootSurfaceNavigator;
+            delete worker->fRootTerminator;
+            delete worker->fRootStepModifier;
+            delete worker->fRootTrackModifier;
+            delete worker->fRootEventModifier;
         }
         fEventWorkers.clear();
         fThreadPool.clear();
