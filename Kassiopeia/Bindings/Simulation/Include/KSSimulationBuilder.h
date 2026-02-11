@@ -56,6 +56,10 @@ template<> inline bool KSSimulationBuilder::AddAttribute(KContainer* aContainer)
         aContainer->CopyTo(fObject, &KSSimulation::SetStepReportIteration);
         return true;
     }
+    if (aContainer->GetName() == "number_of_threads") {
+        aContainer->CopyTo(fObject, &KSSimulation::SetNumberOfThreads);
+        return true;
+    }
     if (aContainer->GetName() == "add_static_run_modifier") {
         fObject->AddStaticRunModifier(KToolbox::GetInstance().Get<KSRunModifier>(aContainer->AsString()));
         return true;

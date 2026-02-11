@@ -182,7 +182,6 @@ TEST_F(ParallelizationTest, SequentialVsParallelComparison)
     
     // Test parameters
     const unsigned int numEvents = 10;
-    const double tolerance = 0.001;  // For floating point comparisons
     
     // Sequential run
     KSSimulation seqSimulation;
