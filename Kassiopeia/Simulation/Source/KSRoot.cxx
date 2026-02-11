@@ -1416,8 +1416,10 @@ void KSRoot::ThreadWorkerFunction(unsigned int threadId)
 
 void KSRoot::ExecuteEventParallel(EventWorker& worker)
 {
-    // Execute event using worker's own components - true parallel execution
-    // We temporarily swap context to reuse existing ExecuteEvent/ExecuteTrack/ExecuteStep logic
+    // CRITICAL: All execution must be serialized when using shared components
+    // Shared root components have internal state that's not thread-safe
+    // We serialize the entire event execution to prevent race conditions
+    KSMutexLock componentLock(fComponentMutex);
     
     // Save current context (local variables - thread-safe)
     KSEvent* savedEvent;
@@ -1425,38 +1427,29 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
     KSStep* savedStep;
     bool savedRestartNavigation;
     
-    // Critical section: swap context pointers (must be atomic per-thread)
-    {
-        KSMutexLock contextLock(fQueueMutex);  // Reuse queue mutex for context operations
-        
-        savedEvent = fEvent;
-        savedTrack = fTrack;
-        savedStep = fStep;
-        savedRestartNavigation = fRestartNavigation;
-        
-        // Switch to worker's context (data containers)
-        fEvent = worker.fEvent;
-        fTrack = worker.fTrack;
-        fStep = worker.fStep;
-        fRestartNavigation = worker.fRestartNavigation;
-        
-        // Configure shared root components to use worker's data
-        // These calls are thread-safe because each worker has its own data containers
-        fRootGenerator->SetEvent(worker.fEvent);
-        fRootTrajectory->SetStep(worker.fStep);
-        fRootSpaceInteraction->SetStep(worker.fStep);
-        fRootSpaceNavigator->SetStep(worker.fStep);
-        fRootSurfaceInteraction->SetStep(worker.fStep);
-        fRootSurfaceNavigator->SetStep(worker.fStep);
-        fRootTerminator->SetStep(worker.fStep);
-        fRootStepModifier->SetStep(worker.fStep);
-        fRootTrackModifier->SetTrack(worker.fTrack);
-        fRootEventModifier->SetEvent(worker.fEvent);
-    }
-    // Context lock released - now execute in parallel with worker's context
+    // Swap context pointers (already under component mutex)
+    savedEvent = fEvent;
+    savedTrack = fTrack;
+    savedStep = fStep;
+    savedRestartNavigation = fRestartNavigation;
     
-    // NOTE: From here until context restore, this thread has exclusive use of its context
-    // Multiple threads can execute this section simultaneously with their own contexts
+    // Switch to worker's context (data containers)
+    fEvent = worker.fEvent;
+    fTrack = worker.fTrack;
+    fStep = worker.fStep;
+    fRestartNavigation = worker.fRestartNavigation;
+    
+    // Configure shared root components to use worker's data
+    fRootGenerator->SetEvent(worker.fEvent);
+    fRootTrajectory->SetStep(worker.fStep);
+    fRootSpaceInteraction->SetStep(worker.fStep);
+    fRootSpaceNavigator->SetStep(worker.fStep);
+    fRootSurfaceInteraction->SetStep(worker.fStep);
+    fRootSurfaceNavigator->SetStep(worker.fStep);
+    fRootTerminator->SetStep(worker.fStep);
+    fRootStepModifier->SetStep(worker.fStep);
+    fRootTrackModifier->SetTrack(worker.fTrack);
+    fRootEventModifier->SetEvent(worker.fEvent);
     
     // Reset event with worker's event index
     fEvent->EventId() = worker.fEventIndex;
@@ -1474,17 +1467,13 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
 
     fEvent->StartTiming();
 
-    // Protect calls to shared root components that may have internal state
-    {
-        KSMutexLock componentLock(fComponentMutex);
-        fRootEventModifier->ExecutePreEventModification();
+    fRootEventModifier->ExecutePreEventModification();
 
-        // Generate primaries - this MUST be protected as generators have internal state
-        fRootGenerator->ExecuteGeneration();
+    // Generate primaries
+    fRootGenerator->ExecuteGeneration();
 
-        // Clear any internal trajectory state
-        fRootTrajectory->Reset();
-    }
+    // Clear any internal trajectory state
+    fRootTrajectory->Reset();
     fRestartNavigation = true;
 
     // Clear any previous GSL errors
@@ -1545,11 +1534,7 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
         fEvent->NumberOfTurns() += fTrack->NumberOfTurns();
     }
 
-    // Protect modifier call
-    {
-        KSMutexLock componentLock(fComponentMutex);
-        fRootEventModifier->ExecutePostEventModification();
-    }
+    fRootEventModifier->ExecutePostEventModification();
 
     fEvent->EndTiming();
 
@@ -1576,33 +1561,32 @@ void KSRoot::ExecuteEventParallel(EventWorker& worker)
     // Save worker's restart navigation state
     worker.fRestartNavigation = fRestartNavigation;
     
-    // Critical section: restore original context
-    {
-        KSMutexLock contextLock(fQueueMutex);  // Reuse queue mutex for context operations
-        fEvent = savedEvent;
-        fTrack = savedTrack;
-        fStep = savedStep;
-        fRestartNavigation = savedRestartNavigation;
-        
-        // Restore root components to use original data containers
-        // This is important to avoid dangling pointers when worker is destroyed
-        if (savedEvent != nullptr) {
-            fRootGenerator->SetEvent(savedEvent);
-            fRootEventModifier->SetEvent(savedEvent);
-        }
-        if (savedTrack != nullptr) {
-            fRootTrackModifier->SetTrack(savedTrack);
-        }
-        if (savedStep != nullptr) {
-            fRootTrajectory->SetStep(savedStep);
-            fRootSpaceInteraction->SetStep(savedStep);
-            fRootSpaceNavigator->SetStep(savedStep);
-            fRootSurfaceInteraction->SetStep(savedStep);
-            fRootSurfaceNavigator->SetStep(savedStep);
-            fRootTerminator->SetStep(savedStep);
-            fRootStepModifier->SetStep(savedStep);
-        }
+    // Restore original context
+    fEvent = savedEvent;
+    fTrack = savedTrack;
+    fStep = savedStep;
+    fRestartNavigation = savedRestartNavigation;
+    
+    // Restore root components to use original data containers
+    // This is important to avoid dangling pointers when worker is destroyed
+    if (savedEvent != nullptr) {
+        fRootGenerator->SetEvent(savedEvent);
+        fRootEventModifier->SetEvent(savedEvent);
     }
+    if (savedTrack != nullptr) {
+        fRootTrackModifier->SetTrack(savedTrack);
+    }
+    if (savedStep != nullptr) {
+        fRootTrajectory->SetStep(savedStep);
+        fRootSpaceInteraction->SetStep(savedStep);
+        fRootSpaceNavigator->SetStep(savedStep);
+        fRootSurfaceInteraction->SetStep(savedStep);
+        fRootSurfaceNavigator->SetStep(savedStep);
+        fRootTerminator->SetStep(savedStep);
+        fRootStepModifier->SetStep(savedStep);
+    }
+    
+    // Component mutex is released here (end of function scope)
     
     fStopEventSignal = false;
     KGslErrorHandler::GetInstance().ClearError();
