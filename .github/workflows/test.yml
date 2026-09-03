@@ -90,6 +90,14 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install dependencies
       run: |
+        # Implement fixes previously suggested by brew doctor
+        brew untap homebrew/cask
+        brew untap homebrew/core
+        brew untap aws/tap
+        brew cleanup
+        # Update brew
+        brew update
+        # Usual start of CI script:
         brew install \
             cmake \
             coreutils \
@@ -100,10 +108,19 @@ jobs:
             libxml2 \
             log4cxx \
             open-mpi \
-            root \
             sqlite \
             vtk \
             libomp
+        # Build root from source instead of using the prebuilt bottle: bottles are
+        # compiled against whatever Xcode/CLT Homebrew's CI last rebuilt them with,
+        # which can trail the Xcode/CLT actually shipped on this runner image. That
+        # skew breaks ROOT's ABI-sensitive reflection code at load time (bus error
+        # in dyld's static initializers). Building from source compiles against the
+        # runner's own toolchain, avoiding the mismatch.
+        brew install --build-from-source root
+        # Print debug output requested for reporting a Homebrew issue
+        brew config
+        brew doctor
     - name: Build code
       run: |
         export CC=/usr/bin/clang
