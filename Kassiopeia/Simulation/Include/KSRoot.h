@@ -3,7 +3,14 @@
 
 #include "KSComponentTemplate.h"
 #include "KSMainMessage.h"
+#include "KSMutex.h"
 #include "KToolbox.h"
+
+#include <atomic>
+#include <deque>
+#include <memory>
+#include <thread>
+#include <vector>
 
 namespace Kassiopeia
 {
@@ -45,6 +52,31 @@ class KSRoot : public KSComponentTemplate<KSRoot>
     void ExecuteEvent();
     void ExecuteTrack();
     void ExecuteStep();
+
+  private:
+    // Thread worker structure for parallel event processing
+    struct EventWorker
+    {
+        KSEvent* fEvent;
+        KSTrack* fTrack;
+        KSStep* fStep;
+        KSRootGenerator* fRootGenerator;
+        KSRootTrajectory* fRootTrajectory;
+        KSRootSpaceInteraction* fRootSpaceInteraction;
+        KSRootSpaceNavigator* fRootSpaceNavigator;
+        KSRootSurfaceInteraction* fRootSurfaceInteraction;
+        KSRootSurfaceNavigator* fRootSurfaceNavigator;
+        KSRootTerminator* fRootTerminator;
+        KSRootStepModifier* fRootStepModifier;
+        KSRootTrackModifier* fRootTrackModifier;
+        KSRootEventModifier* fRootEventModifier;
+        unsigned int fEventIndex;
+        bool fRestartNavigation;
+    };
+
+    void ExecuteEventParallel(EventWorker& worker);
+    void ExecuteTrackParallel(EventWorker& worker);
+    void ThreadWorkerFunction(unsigned int threadId);
 
   protected:
     void ActivateComponent() override;
@@ -88,9 +120,20 @@ class KSRoot : public KSComponentTemplate<KSRoot>
 
     double fTotalExecTime;
 
-    static bool fStopRunSignal;
-    static bool fStopEventSignal;
-    static bool fStopTrackSignal;
+    static std::atomic<bool> fStopRunSignal;
+    static std::atomic<bool> fStopEventSignal;
+    static std::atomic<bool> fStopTrackSignal;
+
+    // Thread pool for parallel event processing
+    std::vector<std::thread> fThreadPool;
+    std::vector<std::unique_ptr<EventWorker>> fEventWorkers;
+    std::deque<unsigned int> fEventQueue;
+    KSMutex fQueueMutex;
+    KSMutex fRunUpdateMutex;
+    KSMutex fWriterMutex;
+    KSMutex fComponentMutex;  // Protects calls to shared root components
+    std::atomic<bool> fThreadsActive;
+    std::atomic<unsigned int> fEventsCompleted;
 };
 
 }  // namespace Kassiopeia

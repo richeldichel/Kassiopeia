@@ -16,6 +16,7 @@ STATICINT sKSSimulationStructure =
     KSSimulationBuilder::Attribute<std::string>("name") + KSSimulationBuilder::Attribute<unsigned int>("seed") +
     KSSimulationBuilder::Attribute<unsigned int>("run") + KSSimulationBuilder::Attribute<unsigned int>("events") +
     KSSimulationBuilder::Attribute<unsigned int>("step_report_iteration") +
+    KSSimulationBuilder::Attribute<unsigned int>("number_of_threads") +
     KSSimulationBuilder::Attribute<std::string>("add_static_run_modifier") +
     KSSimulationBuilder::Attribute<std::string>("add_static_event_modifier") +
     KSSimulationBuilder::Attribute<std::string>("add_static_track_modifier") +

@@ -45,9 +45,9 @@ using namespace katrin;
 
 namespace Kassiopeia
 {
-bool KSRoot::fStopRunSignal = false;
-bool KSRoot::fStopEventSignal = false;
-bool KSRoot::fStopTrackSignal = false;
+std::atomic<bool> KSRoot::fStopRunSignal(false);
+std::atomic<bool> KSRoot::fStopEventSignal(false);
+std::atomic<bool> KSRoot::fStopTrackSignal(false);
 
 KSRoot::KSRoot() :
     fSimulation(nullptr),
@@ -74,7 +74,9 @@ KSRoot::KSRoot() :
     fEventIndex(0),
     fTrackIndex(0),
     fStepIndex(0),
-    fTotalExecTime(0)
+    fTotalExecTime(0),
+    fThreadsActive(false),
+    fEventsCompleted(0)
 {
     KToolbox& toolbox = KToolbox::GetInstance();
 
@@ -252,7 +254,18 @@ KSRoot* KSRoot::Clone() const
 {
     return new KSRoot(*this);
 }
-KSRoot::~KSRoot() = default;
+KSRoot::~KSRoot()
+{
+    // Clean up thread pool if active
+    if (fThreadsActive) {
+        fThreadsActive = false;
+        for (auto& thread : fThreadPool) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+    }
+}
 //{
 /*
  * KToolbox takes care of destruction
@@ -423,51 +436,142 @@ void KSRoot::ExecuteRun()
     // send report
     runmsg(eNormal) << "processing run " << fRun->GetRunId() << " ..." << eom;
 
-    while (true) {
-        fRootRunModifier->ExecutePreRunModification();
+    unsigned int numThreads = fSimulation->GetNumberOfThreads();
 
-        // break if done
-        if (fRun->GetTotalEvents() >= fSimulation->GetEvents()) {
-            break;
+    if (numThreads > 1) {
+        // Parallel execution
+        runmsg(eNormal) << "using " << numThreads << " threads for parallel event processing" << eom;
+        runmsg(eWarning) << "parallel mode: random number generation is not guaranteed to be reproducible" << eom;
+
+        // Initialize event queue
+        fEventQueue.clear();
+        for (unsigned int i = 0; i < fSimulation->GetEvents(); i++) {
+            fEventQueue.push_back(fEventIndex + i);
+        }
+        fEventIndex += fSimulation->GetEvents();
+        fEventsCompleted = 0;
+
+        // Create worker objects for each thread
+        fEventWorkers.clear();
+        for (unsigned int i = 0; i < numThreads; i++) {
+            auto worker = std::make_unique<EventWorker>();
+
+            // Create data containers for each thread (these are per-worker)
+            worker->fEvent = new KSEvent();
+            worker->fEvent->SetName("event_worker_" + std::to_string(i));
+
+            worker->fTrack = new KSTrack();
+            worker->fTrack->SetName("track_worker_" + std::to_string(i));
+
+            worker->fStep = new KSStep();
+            worker->fStep->SetName("step_worker_" + std::to_string(i));
+
+            // Clone root components for each worker thread
+            // Components are cloned AFTER initialization, so they're in a valid state
+            // Each worker gets its own component instances for true parallel execution
+            worker->fRootGenerator = (fRootGenerator != nullptr) ? fRootGenerator->Clone() : nullptr;
+            worker->fRootTrajectory = (fRootTrajectory != nullptr) ? fRootTrajectory->Clone() : nullptr;
+            worker->fRootSpaceInteraction = (fRootSpaceInteraction != nullptr) ? fRootSpaceInteraction->Clone() : nullptr;
+            worker->fRootSpaceNavigator = (fRootSpaceNavigator != nullptr) ? fRootSpaceNavigator->Clone() : nullptr;
+            worker->fRootSurfaceInteraction = (fRootSurfaceInteraction != nullptr) ? fRootSurfaceInteraction->Clone() : nullptr;
+            worker->fRootSurfaceNavigator = (fRootSurfaceNavigator != nullptr) ? fRootSurfaceNavigator->Clone() : nullptr;
+            worker->fRootTerminator = (fRootTerminator != nullptr) ? fRootTerminator->Clone() : nullptr;
+            worker->fRootStepModifier = (fRootStepModifier != nullptr) ? fRootStepModifier->Clone() : nullptr;
+            worker->fRootTrackModifier = (fRootTrackModifier != nullptr) ? fRootTrackModifier->Clone() : nullptr;
+            worker->fRootEventModifier = (fRootEventModifier != nullptr) ? fRootEventModifier->Clone() : nullptr;
+
+            worker->fRestartNavigation = true;
+
+            fEventWorkers.push_back(std::move(worker));
         }
 
-        //signal handler break
-        if (fStopRunSignal) {
-            break;
+        // Start thread pool
+        fThreadsActive = true;
+        fThreadPool.clear();
+        for (unsigned int i = 0; i < numThreads; i++) {
+            fThreadPool.emplace_back(&KSRoot::ThreadWorkerFunction, this, i);
         }
 
-        // initialize event
-        fEvent->ParentRunId() = fRun->GetRunId();
-
-        // execute event
-        try {
-            ExecuteEvent();
-        }
-        catch (KSUserInterrupt const& e) {
-            stepmsg(eInfo) << "Interrupted at run <" << fRun->RunId() << "> (" << e.what() << ")" << eom;
-            // stop current run
-            fStopRunSignal = true;
-        }
-        catch (KException const& e) {
-            stepmsg(eWarning) << "Failed to execute run <" << fRun->RunId() << "> (" << e.what() << ")" << eom;
-            // stop current run
-            fStopRunSignal = true;
+        // Wait for all threads to complete
+        for (auto& thread : fThreadPool) {
+            if (thread.joinable()) {
+                thread.join();
+            }
         }
 
-        // update run
-        fRun->TotalEvents() += 1;
-        fRun->TotalTracks() += fEvent->TotalTracks();
-        fRun->TotalSteps() += fEvent->TotalSteps();
-        fRun->ContinuousTime() += fEvent->ContinuousTime();
-        fRun->ContinuousLength() += fEvent->ContinuousLength();
-        fRun->ContinuousEnergyChange() += fEvent->ContinuousEnergyChange();
-        fRun->ContinuousMomentumChange() += fEvent->ContinuousMomentumChange();
-        fRun->DiscreteEnergyChange() += fEvent->DiscreteEnergyChange();
-        fRun->DiscreteMomentumChange() += fEvent->DiscreteMomentumChange();
-        fRun->DiscreteSecondaries() += fEvent->DiscreteSecondaries();
-        fRun->NumberOfTurns() += fEvent->NumberOfTurns();
+        fThreadsActive = false;
 
-        fRootRunModifier->ExecutePostRunModification();
+        // Clean up workers
+        // Clean up worker objects
+        for (auto& worker : fEventWorkers) {
+            // Delete data containers
+            delete worker->fEvent;
+            delete worker->fTrack;
+            delete worker->fStep;
+            
+            // Delete cloned components
+            delete worker->fRootGenerator;
+            delete worker->fRootTrajectory;
+            delete worker->fRootSpaceInteraction;
+            delete worker->fRootSpaceNavigator;
+            delete worker->fRootSurfaceInteraction;
+            delete worker->fRootSurfaceNavigator;
+            delete worker->fRootTerminator;
+            delete worker->fRootStepModifier;
+            delete worker->fRootTrackModifier;
+            delete worker->fRootEventModifier;
+        }
+        fEventWorkers.clear();
+        fThreadPool.clear();
+    }
+    else {
+        // Single-threaded execution (original behavior)
+        while (true) {
+            fRootRunModifier->ExecutePreRunModification();
+
+            // break if done
+            if (fRun->GetTotalEvents() >= fSimulation->GetEvents()) {
+                break;
+            }
+
+            //signal handler break
+            if (fStopRunSignal) {
+                break;
+            }
+
+            // initialize event
+            fEvent->ParentRunId() = fRun->GetRunId();
+
+            // execute event
+            try {
+                ExecuteEvent();
+            }
+            catch (KSUserInterrupt const& e) {
+                stepmsg(eInfo) << "Interrupted at run <" << fRun->RunId() << "> (" << e.what() << ")" << eom;
+                // stop current run
+                fStopRunSignal = true;
+            }
+            catch (KException const& e) {
+                stepmsg(eWarning) << "Failed to execute run <" << fRun->RunId() << "> (" << e.what() << ")" << eom;
+                // stop current run
+                fStopRunSignal = true;
+            }
+
+            // update run
+            fRun->TotalEvents() += 1;
+            fRun->TotalTracks() += fEvent->TotalTracks();
+            fRun->TotalSteps() += fEvent->TotalSteps();
+            fRun->ContinuousTime() += fEvent->ContinuousTime();
+            fRun->ContinuousLength() += fEvent->ContinuousLength();
+            fRun->ContinuousEnergyChange() += fEvent->ContinuousEnergyChange();
+            fRun->ContinuousMomentumChange() += fEvent->ContinuousMomentumChange();
+            fRun->DiscreteEnergyChange() += fEvent->DiscreteEnergyChange();
+            fRun->DiscreteMomentumChange() += fEvent->DiscreteMomentumChange();
+            fRun->DiscreteSecondaries() += fEvent->DiscreteSecondaries();
+            fRun->NumberOfTurns() += fEvent->NumberOfTurns();
+
+            fRootRunModifier->ExecutePostRunModification();
+        }
     }
 
     fRun->EndTiming();
@@ -1256,6 +1360,257 @@ void KSRoot::SignalHandler(int aSignal)
     // exception is handled in simulation loop
     fStopRunSignal = true;
     //throw KSUserInterrupt() << "User Interrupt: signal " << aSignal;
+}
+
+void KSRoot::ThreadWorkerFunction(unsigned int threadId)
+{
+    EventWorker& worker = *fEventWorkers[threadId];
+
+    while (fThreadsActive) {
+        // Get next event from queue
+        unsigned int eventId = 0;
+        bool hasEvent = false;
+
+        {
+            KSMutexLock lock(fQueueMutex);
+            if (!fEventQueue.empty()) {
+                eventId = fEventQueue.front();
+                fEventQueue.pop_front();
+                hasEvent = true;
+            }
+        }
+
+        if (!hasEvent) {
+            // No more events, exit
+            break;
+        }
+
+        // Check for stop signal
+        if (fStopRunSignal || fStopEventSignal) {
+            break;
+        }
+
+        try {
+            worker.fEventIndex = eventId;
+            ExecuteEventParallel(worker);
+
+            // Update run statistics (thread-safe)
+            {
+                KSMutexLock lock(fRunUpdateMutex);
+                fRun->TotalEvents() += 1;
+                fRun->TotalTracks() += worker.fEvent->TotalTracks();
+                fRun->TotalSteps() += worker.fEvent->TotalSteps();
+                fRun->ContinuousTime() += worker.fEvent->ContinuousTime();
+                fRun->ContinuousLength() += worker.fEvent->ContinuousLength();
+                fRun->ContinuousEnergyChange() += worker.fEvent->ContinuousEnergyChange();
+                fRun->ContinuousMomentumChange() += worker.fEvent->ContinuousMomentumChange();
+                fRun->DiscreteEnergyChange() += worker.fEvent->DiscreteEnergyChange();
+                fRun->DiscreteMomentumChange() += worker.fEvent->DiscreteMomentumChange();
+                fRun->DiscreteSecondaries() += worker.fEvent->DiscreteSecondaries();
+                fRun->NumberOfTurns() += worker.fEvent->NumberOfTurns();
+                fEventsCompleted++;
+            }
+        }
+        catch (KSUserInterrupt const& e) {
+            stepmsg(eInfo) << "Interrupted thread " << threadId << " at event <" << eventId << "> (" << e.what()
+                           << ")" << eom;
+            fStopRunSignal = true;
+            break;
+        }
+        catch (KException const& e) {
+            stepmsg(eWarning) << "Thread " << threadId << " failed to execute event <" << eventId << "> ("
+                              << e.what() << ")" << eom;
+            fStopEventSignal = true;
+        }
+    }
+}
+
+void KSRoot::ExecuteEventParallel(EventWorker& worker)
+{
+    // Serialize entire event execution to prevent component race conditions
+    // Components have internal mutable state and Clone() does shallow copy
+    // This ensures thread safety at the cost of serialization
+    KSMutexLock componentLock(fComponentMutex);
+    
+    // Save current context (local variables - thread-safe)
+    KSEvent* savedEvent;
+    KSTrack* savedTrack;
+    KSStep* savedStep;
+    bool savedRestartNavigation;
+    
+    // Critical section: context switch (brief)
+    {
+        KSMutexLock contextLock(fQueueMutex);
+        savedEvent = fEvent;
+        savedTrack = fTrack;
+        savedStep = fStep;
+        savedRestartNavigation = fRestartNavigation;
+        
+        fEvent = worker.fEvent;
+        fTrack = worker.fTrack;
+        fStep = worker.fStep;
+        fRestartNavigation = worker.fRestartNavigation;
+        
+        // Configure components to use worker's data
+        fRootGenerator->SetEvent(worker.fEvent);
+        fRootTrajectory->SetStep(worker.fStep);
+        fRootSpaceInteraction->SetStep(worker.fStep);
+        fRootSpaceNavigator->SetStep(worker.fStep);
+        fRootSurfaceInteraction->SetStep(worker.fStep);
+        fRootSurfaceNavigator->SetStep(worker.fStep);
+        fRootTerminator->SetStep(worker.fStep);
+        fRootStepModifier->SetStep(worker.fStep);
+        fRootTrackModifier->SetTrack(worker.fTrack);
+        fRootEventModifier->SetEvent(worker.fEvent);
+    }
+    // Context switch complete - now execute in parallel
+    
+    // Reset event with worker's event index
+    fEvent->EventId() = worker.fEventIndex;
+    fEvent->ParentRunId() = fRun->GetRunId();
+    fEvent->TotalTracks() = 0;
+    fEvent->TotalSteps() = 0;
+    fEvent->ContinuousTime() = 0.;
+    fEvent->ContinuousLength() = 0.;
+    fEvent->ContinuousEnergyChange() = 0.;
+    fEvent->ContinuousMomentumChange() = 0.;
+    fEvent->DiscreteEnergyChange() = 0.;
+    fEvent->DiscreteMomentumChange() = 0.;
+    fEvent->DiscreteSecondaries() = 0;
+    fEvent->NumberOfTurns() = 0;
+
+    fEvent->StartTiming();
+
+    fRootEventModifier->ExecutePreEventModification();
+
+    // Protect ONLY the generator call - it uses shared RNG
+    {
+        KSMutexLock lock(fComponentMutex);
+        fRootGenerator->ExecuteGeneration();
+    }
+
+    fRootTrajectory->Reset();
+    fRestartNavigation = true;
+
+    // Clear any previous GSL errors
+    KGslErrorHandler::GetInstance().ClearError();
+
+    KSParticle* tParticle;
+    while (!fEvent->ParticleQueue().empty()) {
+        // Signal handler break
+        if (fStopRunSignal || fStopEventSignal) {
+            // Clear event queue
+            while (!fEvent->ParticleQueue().empty()) {
+                tParticle = fEvent->ParticleQueue().front();
+                delete tParticle;
+                fEvent->ParticleQueue().pop_front();
+            }
+            break;
+        }
+
+        // Move the particle state to the track object
+        tParticle = fEvent->ParticleQueue().front();
+        tParticle->ReleaseLabel(fTrack->CreatorName());
+        fTrack->InitialParticle() = *tParticle;
+        fTrack->FinalParticle() = *tParticle;
+
+        // Delete the particle and pop the queue
+        delete tParticle;
+        fEvent->ParticleQueue().pop_front();
+
+        // Execute a track
+        try {
+            ExecuteTrack();
+        }
+        catch (KSUserInterrupt const& e) {
+            stepmsg(eInfo) << "Interrupted at event <" << fEvent->EventId() << "> (" << e.what() << ")" << eom;
+            fStopRunSignal = true;
+        }
+        catch (KException const& e) {
+            stepmsg(eWarning) << "Failed to execute event <" << fEvent->EventId() << "> (" << e.what() << ")" << eom;
+            fStopEventSignal = true;
+        }
+
+        // Move particles in track queue to event queue
+        while (!fTrack->ParticleQueue().empty()) {
+            fEvent->ParticleQueue().push_back(fTrack->ParticleQueue().front());
+            fTrack->ParticleQueue().pop_front();
+        }
+
+        // Update event
+        fEvent->TotalTracks() += 1;
+        fEvent->TotalSteps() += fTrack->GetTotalSteps();
+        fEvent->ContinuousTime() += fTrack->ContinuousTime();
+        fEvent->ContinuousLength() += fTrack->ContinuousLength();
+        fEvent->ContinuousEnergyChange() += fTrack->ContinuousEnergyChange();
+        fEvent->ContinuousMomentumChange() += fTrack->ContinuousMomentumChange();
+        fEvent->DiscreteEnergyChange() += fTrack->DiscreteEnergyChange();
+        fEvent->DiscreteMomentumChange() += fTrack->DiscreteMomentumChange();
+        fEvent->DiscreteSecondaries() += fTrack->DiscreteSecondaries();
+        fEvent->NumberOfTurns() += fTrack->NumberOfTurns();
+    }
+
+    fRootEventModifier->ExecutePostEventModification();
+
+    fEvent->EndTiming();
+
+    // Write event (thread-safe)
+    // Note: We don't call PushUpdate/PushDeupdate on worker components because:
+    // 1. Worker components are clones that haven't been through proper activation lifecycle
+    // 2. PushUpdate/PushDeupdate are primarily for state management in the component tree
+    // 3. We only need the data in worker.fEvent for writing, not the full component state
+    {
+        KSMutexLock lock(fWriterMutex);
+        // Temporarily swap to worker context just for writing
+        // (Writer needs to access the current fEvent and fRootEventModifier)
+        fRootWriter->ExecuteEvent();
+    }
+
+    auto tTimeSpan = fEvent->GetProcessingDuration();
+    
+    // Update total execution time (thread-safe)
+    {
+        KSMutexLock lock(fRunUpdateMutex);
+        fTotalExecTime += tTimeSpan;
+    }
+
+    // Save worker's restart navigation state
+    worker.fRestartNavigation = fRestartNavigation;
+    
+    // Critical section: restore context (brief)
+    {
+        KSMutexLock contextLock(fQueueMutex);
+        fEvent = savedEvent;
+        fTrack = savedTrack;
+        fStep = savedStep;
+        fRestartNavigation = savedRestartNavigation;
+        
+        if (savedEvent != nullptr) {
+            fRootGenerator->SetEvent(savedEvent);
+            fRootEventModifier->SetEvent(savedEvent);
+        }
+        if (savedTrack != nullptr) {
+            fRootTrackModifier->SetTrack(savedTrack);
+        }
+        if (savedStep != nullptr) {
+            fRootTrajectory->SetStep(savedStep);
+            fRootSpaceInteraction->SetStep(savedStep);
+            fRootSpaceNavigator->SetStep(savedStep);
+            fRootSurfaceInteraction->SetStep(savedStep);
+            fRootSurfaceNavigator->SetStep(savedStep);
+            fRootTerminator->SetStep(savedStep);
+            fRootStepModifier->SetStep(savedStep);
+        }
+    }
+    
+    fStopEventSignal = false;
+    KGslErrorHandler::GetInstance().ClearError();
+}
+
+void KSRoot::ExecuteTrackParallel(EventWorker& worker)
+{
+    // This function is no longer used - context switching happens in ExecuteEventParallel
+    (void)worker;  // Suppress unused parameter warning
 }
 
 }  // namespace Kassiopeia

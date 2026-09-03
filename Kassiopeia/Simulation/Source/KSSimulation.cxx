@@ -7,13 +7,14 @@ using namespace std;
 namespace Kassiopeia
 {
 
-KSSimulation::KSSimulation() : fSeed(0), fRun(0), fEvents(0), fStepReportIteration(1000), fCommands() {}
+KSSimulation::KSSimulation() : fSeed(0), fRun(0), fEvents(0), fStepReportIteration(1000), fNumberOfThreads(1), fCommands() {}
 KSSimulation::KSSimulation(const KSSimulation& aCopy) :
     KSComponent(aCopy),
     fSeed(aCopy.fSeed),
     fRun(aCopy.fRun),
     fEvents(aCopy.fEvents),
     fStepReportIteration(aCopy.fStepReportIteration),
+    fNumberOfThreads(aCopy.fNumberOfThreads),
     fCommands()
 {}
 KSSimulation* KSSimulation::Clone() const
@@ -60,6 +61,22 @@ void KSSimulation::SetStepReportIteration(const unsigned int& anIteration)
 const unsigned int& KSSimulation::GetStepReportIteration() const
 {
     return fStepReportIteration;
+}
+
+void KSSimulation::SetNumberOfThreads(const unsigned int& aThreadCount)
+{
+    // Ensure at least 1 thread (0 is invalid)
+    if (aThreadCount == 0) {
+        mainmsg(eWarning) << "Number of threads must be at least 1, setting to 1" << eom;
+        fNumberOfThreads = 1;
+    }
+    else {
+        fNumberOfThreads = aThreadCount;
+    }
+}
+const unsigned int& KSSimulation::GetNumberOfThreads() const
+{
+    return fNumberOfThreads;
 }
 
 void KSSimulation::AddCommand(KSCommand* aCommand)

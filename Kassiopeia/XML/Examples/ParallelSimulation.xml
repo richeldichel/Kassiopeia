@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+    Example configuration demonstrating parallel event processing in Kassiopeia
+    
+    This example shows how to enable multi-threading for improved performance.
+    Simply add the number_of_threads parameter to your ks_simulation element.
+-->
+<kassiopeia>
+
+    <!-- Example simulation with 4 parallel threads -->
+    <ks_simulation
+        name="parallel_simulation_example"
+        run="1"
+        seed="12345"
+        events="100"
+        number_of_threads="4"
+        magnetic_field="field_magnetic"
+        electric_field="field_electric"
+        space="space_world"
+        generator="generator_default"
+        trajectory="trajectory_exact"
+        space_navigator="nav_space"
+        surface_navigator="nav_surface"
+        terminator="term_default"
+        writer="write_output"
+    />
+
+    <!-- 
+        Performance Tips:
+        - Set number_of_threads to match your CPU core count for best performance
+        - Use number_of_threads="1" for deterministic, reproducible results
+        - Parallel execution is most beneficial for simulations with many events
+        - Event order and random number sequences may differ from single-threaded mode
+    -->
+
+</kassiopeia>

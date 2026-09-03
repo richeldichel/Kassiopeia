@@ -7,6 +7,7 @@ set (UNIT_TESTS_HEADERFILES
     ${CMAKE_CURRENT_SOURCE_DIR}/Include/Generators.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Include/Operators.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Include/Terminators.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Include/Parallelization.h
 )
 
 set (UNIT_TESTS_SOURCEFILES
@@ -14,6 +15,7 @@ set (UNIT_TESTS_SOURCEFILES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Generators.cxx
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Operators.cxx
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Terminators.cxx
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parallelization.cxx
 )
 
 
